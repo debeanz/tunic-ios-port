@@ -429,11 +429,10 @@ static intptr_t MSExeSlide(void) {
     if (s == -1) for (uint32_t k = 0; k < _dyld_image_count(); k++) if (_dyld_get_image_header(k)->filetype == MH_EXECUTE) { s = _dyld_get_image_vmaddr_slide(k); break; }
     return s;
 }
-static int MSMouseGate(void) { return *(volatile uint8_t *)(MS_MOUSE_GATE + MSExeSlide()); }
-static void MSOpenMouseGate(void) {
-    volatile uint8_t *g = (volatile uint8_t *)(MS_MOUSE_GATE + MSExeSlide());
-    if (!*g) { *g = 1; static int n; if (n++ < 5) MSLogf(@"mouse gate opened (touch = mouse)"); }
-}
+/* Tunic: no such gate - and the fixed Cyberpunk address lands on unmapped memory in Tunic's executable (crashed the
+   progress monitor, 9th device run). Under LiveContainer the first MH_EXECUTE image isn't even the game. */
+static int MSMouseGate(void) { (void)MSExeSlide; return 0; }
+static void MSOpenMouseGate(void) {}
 static _Atomic long long g_gcmMoves, g_gcmHovers; static _Atomic double g_gcmLastMoveAt;
 static CGPoint g_gcmCursor; static BOOL g_gcmCursorSet;  /* where menu mouse events point (view points) */
 static void MSGCMouseMove(MSHostView *h, CGPoint d);

@@ -294,6 +294,14 @@ static BOOL um_supportsFamily(id self, SEL _cmd, NSInteger family) {
     if (family == 2001 || family == 2002 || family == 4001 || family == 4002) return YES;    /* Mac1, Mac2, MacCatalyst1/2 */
     return ((BOOL (*)(id, SEL, NSInteger))o_supportsFamily)(self, _cmd, family);
 }
+/* MTLCopyAllDevices: macOS only, and MacShim.m only had the ...WithObserver variant. Unity dlsym's it and, finding
+   nothing, counted zero GPUs -> Null device (9th device run). Copy rule: the array is returned retained. */
+UM_EXPORT NSArray *um_MTLCopyAllDevices(void) __asm("_MTLCopyAllDevices");
+UM_EXPORT NSArray *um_MTLCopyAllDevices(void) {
+    id<MTLDevice> d = MTLCreateSystemDefaultDevice();
+    static int said; if (!said++) UMLog(@"MTLCopyAllDevices -> %@", d.name ?: @"no device");
+    return (__bridge NSArray *)CFBridgingRetain(d ? @[ d ] : @[]);
+}
 static void UMMetalAsMac(void) {
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice(); if (!dev) { UMLog(@"no Metal device"); return; }
     Class C = object_getClass(dev);
