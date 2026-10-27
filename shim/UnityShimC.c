@@ -138,11 +138,19 @@ __attribute__((constructor)) static void ms_init_tis(void) {
 static CFTypeRef ms_input_source(void) { static CFTypeRef s; if (!s) s = cfstr("com.apple.keylayout.US"); return s; }
 EXPORT CFTypeRef TISCopyCurrentKeyboardInputSource(void) { return CFRetain(ms_input_source()); }
 EXPORT CFTypeRef TISCopyCurrentASCIICapableKeyboardLayoutInputSource(void) { return CFRetain(ms_input_source()); }
+extern CFTypeRef CFDataCreate(const void *alloc, const uint8_t *bytes, long len);
 EXPORT CFTypeRef TISGetInputSourceProperty(CFTypeRef src, CFTypeRef key) {     /* "Get": not retained */
     (void)src;
     if (key == kTISPropertyInputSourceID) return ms_input_source();
     if (key == kTISPropertyInputSourceType) return kTISTypeKeyboardLayout;
-    return 0;                                                                  /* no uchr data: nothing to translate */
+    if (key == kTISPropertyUnicodeKeyLayoutData) {
+        /* Unity reads the bytes without a NULL check (CFDataGetBytePtr crash, 4th device run): an all-zero 'uchr' block.
+           It only goes back into UCKeyTranslate, which answers "no translation" - keys come through GameController. */
+        static CFTypeRef layout; static uint8_t zeros[1024];
+        if (!layout) layout = CFDataCreate(0, zeros, sizeof zeros);
+        return layout;
+    }
+    return 0;
 }
 EXPORT uint8_t LMGetKbdType(void) { return 40; }                              /* ANSI */
 EXPORT double GetCurrentEventTime(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9; }
