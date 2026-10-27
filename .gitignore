@@ -13,3 +13,7 @@ build-signed/
 *.app/
 game/
 extracted/
+
+# Python caches
+__pycache__/
+*.pyc

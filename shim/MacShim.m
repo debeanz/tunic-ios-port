@@ -64,6 +64,9 @@ static BOOL MSMirrorFit(UIView *v, CGRect *r);
 @class NSWindow; static __weak NSWindow *g_gameWin;
 
 static void MSLogf(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
+/* Tunic / Unity additions (UnityShim.m) */
+NSString *MacShimMacAppRoot(void); NSString *MacShimDataFolder(void);
+const char *MacShimMapLibraryPath(const char *path, char *buf, size_t len);
 static BOOL g_cursorHidden = NO, g_pointerLocked = NO;
 static CGPoint g_mouse;                                  /* Cocoa coords: origin bottom-left, points */
 static NSUInteger g_modFlags = 0;
@@ -1163,20 +1166,30 @@ static NSString *const kBookmarkKey = @"MacShimDataBookmark2";      /* "play fro
 static NSString *const kImportSrcKey = @"MacShimImportSource";       /* folder being imported, to resume */
 static NSString *g_root; static NSURL *g_scopedURL; static BOOL g_external, g_hadBookmark;
 
+/* Tunic: the game folder is the Mac app's Contents/Resources folder (Data/ with data.unity3d and il2cpp_data, plus
+   "unity default resources"). It ships inside the IPA (Game/Resources) or is copied into Documents/Tunic. */
 static BOOL MSLooksLikeGameFolder(NSString *p) {
     NSFileManager *fm = NSFileManager.defaultManager; BOOL isDir = NO;
-    for (NSString *n in @[ @"archive", @"engine", @"r6" ])
-        if (![fm fileExistsAtPath:[p stringByAppendingPathComponent:n] isDirectory:&isDir] || !isDir) return NO;
-    return YES;
+    if (![fm fileExistsAtPath:[p stringByAppendingPathComponent:@"Data/data.unity3d"]]) return NO;
+    return [fm fileExistsAtPath:[p stringByAppendingPathComponent:@"Data/il2cpp_data"] isDirectory:&isDir] && isDir;
 }
 static NSString *MSInternalRoot(void) {
     NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    return [docs stringByAppendingPathComponent:@"Cyberpunk 2077"];
+    return [docs stringByAppendingPathComponent:@"Tunic"];
 }
+static NSString *MSBundledRoot(void) { return [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Game/Resources"]; }
 /* an import writes here and is renamed to MSInternalRoot() only once every file is complete */
 static NSString *MSImportRoot(void) {
     NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    return [docs stringByAppendingPathComponent:@"Cyberpunk 2077 (importing)"];
+    return [docs stringByAppendingPathComponent:@"Tunic (importing)"];
+}
+/* the picked folder, or the game folder inside it: Tunic.app, its Contents folder, or Resources itself */
+static NSString *MSGameFolderIn(NSString *p) {
+    for (NSString *sub in @[ @"", @"Resources", @"Contents/Resources", @"Tunic.app/Contents/Resources" ]) {
+        NSString *q = sub.length ? [p stringByAppendingPathComponent:sub] : p;
+        if (MSLooksLikeGameFolder(q)) return q;
+    }
+    return nil;
 }
 /* the saved external folder with access started, or nil while it can't be reached (SSD unplugged / still mounting) */
 static NSURL *MSResolveBookmarkKey(NSString *key) {
@@ -1193,6 +1206,8 @@ static NSString *MSDataRoot(void) {            /* nil => setup screen (import / 
     static dispatch_once_t o;
     dispatch_once(&o, ^{
         g_hadBookmark = [NSUserDefaults.standardUserDefaults dataForKey:kBookmarkKey] != nil;
+        /* Tunic: data packed into the IPA first (the default build), then a copy in Documents */
+        if (MSLooksLikeGameFolder(MSBundledRoot())) { g_root = MSBundledRoot(); return; }
         /* a copy in the app's own Documents (imported, or copied in with the Files app) wins: no drive to drop off the bus */
         if (MSLooksLikeGameFolder(MSInternalRoot())) { g_root = MSInternalRoot(); return; }
         if ([NSFileManager.defaultManager fileExistsAtPath:MSImportRoot()]) return;     /* unfinished import: setup resumes it */
@@ -1205,12 +1220,13 @@ static NSString *MSDataRoot(void) {            /* nil => setup screen (import / 
     });
     return g_root;
 }
+NSString *MacShimDataFolder(void) { return MSDataRoot(); }
 static NSDictionary *MSConfig(void) {
     static NSDictionary *c; static dispatch_once_t o;
     dispatch_once(&o, ^{
-        NSString *p = [(MSDataRoot() ?: MSInternalRoot()) stringByAppendingPathComponent:@"macshim.plist"];
-        c = [NSDictionary dictionaryWithContentsOfFile:p];
-        if (!c) c = [NSDictionary dictionaryWithContentsOfFile:[MSInternalRoot() stringByAppendingPathComponent:@"macshim.plist"]] ?: @{};
+        /* Documents/Tunic/macshim.plist (editable in the Files app; the bundled data folder is read-only) */
+        c = [NSDictionary dictionaryWithContentsOfFile:[MSInternalRoot() stringByAppendingPathComponent:@"macshim.plist"]];
+        if (!c) c = [NSDictionary dictionaryWithContentsOfFile:[(MSDataRoot() ?: MSInternalRoot()) stringByAppendingPathComponent:@"macshim.plist"]] ?: @{};
     });
     return c;
 }
@@ -1231,7 +1247,7 @@ static NSString *MSGB(uint64_t b) { return [NSString stringWithFormat:@"%.1f GB"
 @implementation MSSetupVC
 - (void)viewDidLoad {
     [super viewDidLoad]; self.view.backgroundColor = UIColor.blackColor;
-    UILabel *title = [UILabel new]; title.text = @"CyPort"; title.font = [UIFont boldSystemFontOfSize:30]; title.textColor = UIColor.whiteColor;
+    UILabel *title = [UILabel new]; title.text = @"Tunic"; title.font = [UIFont boldSystemFontOfSize:30]; title.textColor = UIColor.whiteColor;
     _info = [UILabel new]; _info.numberOfLines = 0; _info.textColor = [UIColor colorWithWhite:0.8 alpha:1]; _info.font = [UIFont systemFontOfSize:17];
     _importBtn = [UIButton buttonWithType:UIButtonTypeSystem]; _importBtn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
     [_importBtn addTarget:self action:@selector(importTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -1243,7 +1259,7 @@ static NSString *MSGB(uint64_t b) { return [NSString stringWithFormat:@"%.1f GB"
     _storeBtn = [UIButton buttonWithType:UIButtonTypeSystem]; _storeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
     [_storeBtn setTitle:@"Download from Steam, GOG or Epic…" forState:UIControlStateNormal];
     [_storeBtn addTarget:self action:@selector(storeTapped) forControlEvents:UIControlEventTouchUpInside];
-    _storeBtn.hidden = NSClassFromString(@"MSStoreUI") == nil;
+    _storeBtn.hidden = YES;          /* the store downloader (StoresCore.swift) only knows Cyberpunk's store listings */
     UIStackView *st = [[UIStackView alloc] initWithArrangedSubviews:@[ title, _info, _storeBtn, _importBtn, _bar, _status ]];   /* no "play from SSD": import only */
     st.axis = UILayoutConstraintAxisVertical; st.spacing = 20; st.translatesAutoresizingMaskIntoConstraints = NO; [self.view addSubview:st];
     [NSLayoutConstraint activateConstraints:@[
@@ -1251,10 +1267,10 @@ static NSString *MSGB(uint64_t b) { return [NSString stringWithFormat:@"%.1f GB"
         [st.widthAnchor constraintLessThanOrEqualToConstant:560], [st.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.leadingAnchor constant:24] ]];
     BOOL resume = [NSFileManager.defaultManager fileExistsAtPath:MSImportRoot()];
     _info.text = resume
-        ? @"The game import didn't finish. Plug in the SSD and tap Continue - files that are already copied are skipped."
-        : @"Download the game from the store you bought it on (Steam, GOG or Epic), or import it: pick the \"Cyberpunk 2077\" folder (with archive, engine and r6 inside), e.g. on your SSD. "
-          @"It is copied to this iPhone (about 61 GB). Keep the app open while it copies.\n\n"
-          @"You can also copy the \"Cyberpunk 2077\" folder yourself with the Files app into On My iPhone > this app.";
+        ? @"The game import didn't finish. Tap Continue - files that are already copied are skipped."
+        : @"Import your copy of Tunic for Mac: pick Tunic.app (or its Contents/Resources folder, the one with Data inside). "
+          @"It is copied to this iPhone (about 1.5 GB). Keep the app open while it copies.\n\n"
+          @"You can also copy the Resources folder's contents yourself with the Files app into On My iPhone > Tunic > Tunic.";
     [_importBtn setTitle:resume ? @"Continue import" : @"Import game…" forState:UIControlStateNormal];
 }
 - (void)importTapped {
@@ -1280,11 +1296,9 @@ static NSString *MSGB(uint64_t b) { return [NSString stringWithFormat:@"%.1f GB"
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)c didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *u = urls.firstObject; if (!u) return; [u startAccessingSecurityScopedResource];
-    if (!MSLooksLikeGameFolder(u.path)) {
-        NSString *sub = [u.path stringByAppendingPathComponent:@"Cyberpunk 2077"];     /* user picked the parent by mistake */
-        if (MSLooksLikeGameFolder(sub)) u = [NSURL fileURLWithPath:sub isDirectory:YES];
-        else { _status.text = @"That folder doesn't contain archive, engine and r6. Pick the \"Cyberpunk 2077\" folder itself."; [u stopAccessingSecurityScopedResource]; return; }
-    }
+    NSString *game = MSGameFolderIn(u.path);       /* Tunic.app, Contents or Resources: whichever was picked */
+    if (!game) { _status.text = @"That folder doesn't contain Tunic's Data folder. Pick Tunic.app or its Contents/Resources folder."; [u stopAccessingSecurityScopedResource]; return; }
+    if (![game isEqualToString:u.path]) u = [NSURL fileURLWithPath:game isDirectory:YES];
     NSError *e = nil; NSData *bm = [u bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&e];
     if (!_pickForSSD) {
         if (bm) [NSUserDefaults.standardUserDefaults setObject:bm forKey:kImportSrcKey];
@@ -1309,7 +1323,7 @@ static NSString *MSGB(uint64_t b) { return [NSString stringWithFormat:@"%.1f GB"
         NSString *err = [self copyFrom:from to:to];
         [self ui:^{
             self.copying = NO; UIApplication.sharedApplication.idleTimerDisabled = NO;
-            if (!err) { [self done:@"Game imported" msg:@"Open the app again to start the game. You can unplug the SSD."]; return; }
+            if (!err) { [self done:@"Game imported" msg:@"Open the app again to start the game."]; return; }
             self.status.textColor = UIColor.systemOrangeColor; self.status.text = err;
             self.importBtn.enabled = YES; [self.importBtn setTitle:@"Continue import" forState:UIControlStateNormal];
         }];
@@ -1641,6 +1655,7 @@ static BOOL MSApplySteady30(NSMutableString *txt) {
 }
 static BOOL MSSmoothOn(void);
 static void MSApplyGameSettings(NSSet *keys) {
+    return;                 /* Tunic: everything below edits Cyberpunk's UserSettings.json / streaming ini */
     MSWriteStreamingIni();
     /* Only the resolution is written, as a text edit of its "value" (the game is offered only that one mode); the rest of
        the file stays byte for byte as the game wrote it. Re-serialising the whole file (NSJSONSerialization escapes every
@@ -1833,6 +1848,7 @@ static void MSShowRestartPopup(NSArray *changed) {
     MSLogf(@"restart popup shown (%@)", [changed componentsJoinedByString:@", "]);
 }
 static void MSWatchGameSettings(void) {
+    return;                 /* Tunic: watches Cyberpunk's UserSettings.json */
     if ([MSConfig()[@"RestartPopup"] isEqual:@NO]) return;
     static NSDictionary *base; static double t0, drawingSince; static BOOL pending;
     t0 = CACurrentMediaTime(); base = MSRestartSettingsSnapshot();
@@ -1954,6 +1970,22 @@ static void MSBootUIKit(void) {
 }
 static BOOL MSCallerIsMainExe(void *ret) { Dl_info i; return dladdr(ret, &i) && i.dli_fbase == (void *)_dyld_get_image_header(0); }
 
+/* Unity's Mac player: main() -> PlayerMain() -> NSApplicationMain(), which on macOS loads MainMenu.nib (its only job:
+   create the PlayerAppDelegate and make it NSApp's delegate) and runs the app. Here the first call boots UIKit and the
+   start screen instead; Play then restarts main() (see MSBootDelegate) and the second call sets the game up. */
+int NSApplicationMain(int argc, const char *argv[]) {
+    (void)argc; (void)argv;
+    MSCalledFromGameMain(NULL);                 /* finds the game's main() (LC_MAIN) for that restart */
+    if (!g_uikitUp) { MSLogf(@"NSApplicationMain: booting UIKit first"); MSBootUIKit(); }
+    Class pc = NSClassFromString(@"PlayerApplication") ?: [NSApplication class];
+    [pc sharedApplication];
+    Class dc = NSClassFromString(@"PlayerAppDelegate");
+    if (dc && ![NSApp delegate]) [NSApp setDelegate:[dc new]];
+    MSLogf(@"NSApplicationMain: NSApp %@, delegate %@; running", NSStringFromClass([NSApp class]), NSStringFromClass([[NSApp delegate] class]));
+    [NSApp run];
+    return 0;
+}
+
 int ms_NSGetExecutablePath(char *buf, uint32_t *size) __asm("__NSGetExecutablePath");
 int ms_NSGetExecutablePath(char *buf, uint32_t *size) {
     NSString *root = MSDataRoot();
@@ -1961,7 +1993,8 @@ int ms_NSGetExecutablePath(char *buf, uint32_t *size) {
         if (MSCallerIsMainExe(__builtin_return_address(0))) MSRunSetup();      /* the game itself asked: show the folder picker instead */
         root = MSInternalRoot();
     }
-    const char *p = [[root stringByAppendingPathComponent:@"Cyberpunk2077.app/Contents/MacOS/Cyberpunk2077"] fileSystemRepresentation];
+    /* Tunic: the Mac-style app folder the shim builds (Contents/MacOS, Resources -> the data, PlugIns -> Frameworks) */
+    const char *p = [[MacShimMacAppRoot() stringByAppendingPathComponent:@"Contents/MacOS/Secret Legend"] fileSystemRepresentation];
     uint32_t n = (uint32_t)strlen(p) + 1; if (*size < n) { *size = n; return -1; } memcpy(buf, p, n);
     static int logged; if (logged++ < 3) MSLogf(@"_NSGetExecutablePath -> %s", p);
     return 0;
@@ -4525,25 +4558,21 @@ static void MSInstallBackgroundFreeze(void) {
 __attribute__((constructor)) static void MSInit(void) {
     @autoreleasepool {
         MSOpenLog();
-        MSInstallFreeHook();
+        /* Tunic: no MSInstallFreeHook() - it hooks Cyberpunk's engine allocator at a fixed address */
         MSInstallBackgroundFreeze();
         if (getenv("MACSHIM_PROBE_VA")) MSProbeVA();
         NSFileManager *fm = NSFileManager.defaultManager; NSString *internal = MSInternalRoot();
         [fm createDirectoryAtPath:internal withIntermediateDirectories:YES attributes:nil error:nil];     /* shows up in Files > On My iPad/iPhone */
         NSString *root = MSDataRoot();
         if (root) {
-            NSString *exe = [root stringByAppendingPathComponent:@"Cyberpunk2077.app/Contents/MacOS"], *ph = [exe stringByAppendingPathComponent:@"Cyberpunk2077"];
-            if (![fm fileExistsAtPath:ph]) {            /* realpath() on the pretend executable must succeed */
-                [fm createDirectoryAtPath:exe withIntermediateDirectories:YES attributes:nil error:nil];
-                [@"" writeToFile:ph atomically:YES encoding:NSUTF8StringEncoding error:nil];
-            }
-            if (!g_external) for (NSString *d in @[ @"r6/cache", @"r6/config" ]) [fm createDirectoryAtPath:[root stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
-            chdir(root.fileSystemRepresentation);
-            MSLogf(@"game folder (%@): %@", g_external ? @"external" : @"internal", root);
+            NSString *app = MacShimMacAppRoot();       /* Contents/MacOS, Resources -> the data, PlugIns -> Frameworks */
+            chdir(app.fileSystemRepresentation);
+            MSLogf(@"game folder (%@): %@ -> %@", [root hasPrefix:NSBundle.mainBundle.bundlePath] ? @"in the app" : g_external ? @"external" : @"internal", root, app);
         } else MSLogf(@"no game folder yet - setup screen will appear when the game starts");
         MSAddMacAPIs();
         MSHookGameWindow();
-        [NSApplication sharedApplication];
+        /* Unity subclasses NSApplication (PlayerApplication): NSApp must be one, or its overrides never run */
+        [(NSClassFromString(@"PlayerApplication") ?: [NSApplication class]) sharedApplication];
         MSMainAsync(^{
             if (GCKeyboard.coalescedKeyboard) MSAttachKeyboard(GCKeyboard.coalescedKeyboard);
             [NSNotificationCenter.defaultCenter addObserverForName:GCKeyboardDidConnectNotification object:nil queue:nil usingBlock:^(NSNotification *n) { MSAttachKeyboard(n.object); }];
@@ -4654,7 +4683,12 @@ void *ms_dlopen(const char *path, int mode) {
     if (path && strstr(path, "libGameServices") && [MSConfig()[@"GameServices"] isEqual:@NO]) {
         MSLogf(@"dlopen %s -> refused (GameServices = NO)", path); return NULL;
     }
-    return real(path, mode);
+    /* Tunic: macOS framework paths (.../Versions/A/X) and bare plugin names ("fmodstudio") -> their iOS / Frameworks files */
+    char buf[1024]; const char *mapped = path ? MacShimMapLibraryPath(path, buf, sizeof buf) : NULL;
+    void *h = real(mapped ?: path, mode);
+    static _Atomic int logged; if (path && logged++ < 60)
+        MSLogf(@"dlopen %s%s%s -> %s", path, mapped ? " => " : "", mapped ?: "", h ? "ok" : dlerror() ?: "failed");
+    return h;
 }
 static void ms_galaxyProcessData(void) {
     static void (*real)(void); static int allow = -1;

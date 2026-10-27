@@ -1,0 +1,20 @@
+# Builds libMacShim.dylib (the iOS stand-ins for AppKit & co. plus the start screen) on a Mac runner.
+# Only this repo's own code is compiled: no game files are uploaded or used. tools/make_ipa.py then builds the IPA
+# on your PC from your copy of Tunic and this artifact (gh run download -n libMacShim -D build/shim).
+name: shim
+on:
+  push:
+    paths: [ "shim/**", "tools/build_shim.sh", "tools/check_shim.py", "tools/shim_needs.txt", ".github/workflows/shim.yml" ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build libMacShim.dylib
+        run: tools/build_shim.sh build/shim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libMacShim
+          path: build/shim/libMacShim.dylib
+          if-no-files-found: error

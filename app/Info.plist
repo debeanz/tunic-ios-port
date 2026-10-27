@@ -2,24 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleExecutable</key><string>Cyberpunk2077</string>
+	<key>CFBundleExecutable</key><string>__EXECUTABLE__</string>
 	<key>CFBundleIdentifier</key><string>__BUNDLE_ID__</string>
-	<key>CFBundleName</key><string>CyPort</string>
-	<key>CFBundleDisplayName</key><string>CyPort</string>
+	<key>CFBundleName</key><string>Tunic</string>
+	<key>CFBundleDisplayName</key><string>Tunic</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2.3.1</string>
-	<key>CFBundleVersion</key><string>5314028</string>
+	<key>CFBundleShortVersionString</key><string>__VERSION__</string>
+	<key>CFBundleVersion</key><string>__BUILD__</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>
-	<key>MinimumOSVersion</key><string>18.0</string>
+	<key>MinimumOSVersion</key><string>16.0</string>
 	<key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
 	<key>UIRequiredDeviceCapabilities</key><array><string>arm64</string><string>metal</string></array>
 	<key>UIRequiresFullScreen</key><true/>
 	<key>UILaunchScreen</key><dict/>
-	<!-- app icon: the game's own Mac icon artwork, full bleed (app/icons, copied by build.sh) -->
+	<!-- app icon: the game's own Mac icon artwork (PlayerIcon.icns), copied by tools/make_ipa.py -->
 	<key>CFBundleIcons</key>
 	<dict><key>CFBundlePrimaryIcon</key><dict>
-		<key>CFBundleIconFiles</key><array><string>AppIcon60x60</string><string>AppIcon40x40</string></array>
+		<key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array>
 	</dict></dict>
 	<key>CFBundleIcons~ipad</key>
 	<dict><key>CFBundlePrimaryIcon</key><dict>
@@ -37,8 +37,9 @@
 	<key>LSApplicationCategoryType</key><string>public.app-category.action-games</string>
 	<key>GCSupportedGameControllers</key>
 	<array><dict><key>ProfileName</key><string>ExtendedGamepad</string></dict></array>
-	<!-- full refresh rate on ProMotion displays (the game paces itself) -->
+	<!-- full refresh rate on ProMotion displays -->
 	<key>CADisableMinimumFrameDurationOnPhone</key><true/>
+	<!-- Documents (logs, macshim.plist, an imported game folder) visible in the Files app -->
 	<key>UIFileSharingEnabled</key><true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key><true/>
 </dict>

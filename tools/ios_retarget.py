@@ -13,8 +13,12 @@ address-space reserve functions - see patch_pool_end().
   4. leaves LC_CODE_SIGNATURE untouched (the old signature is simply invalid now;
      re-sign the result yourself with `codesign -f -s <identity>`)
 
-Usage:  ios_retarget.py IN OUT [--minos 18.0] [--sdk 18.0]
+Usage:  ios_retarget.py IN OUT [--minos 16.0] [--sdk 18.0] [--profile tunic|cyberpunk]
         ios_retarget.py --info FILE
+
+Profiles: "tunic" (default here) retargets Tunic's Unity 2020.3 Mac build (game executable, UnityPlayer, GameAssembly,
+plugins). Those binaries use dyld-info binds, not chained fixups, so the shim reroutes go through the lazy-bind records
+(reroute_lazy). "cyberpunk" keeps CyPort's original behaviour, including its engine patches.
 """
 import os, re, struct, sys, argparse
 
@@ -48,15 +52,32 @@ REROUTE = {"__NSGetExecutablePath", "_sysctlbyname", "_mmap", "_munmap", "_madvi
            "_sched_yield",
            # job waits: workers / game thread spin briefly before sleeping (wake-ups are slow on a hot iPhone; JobSpin switch)
            "_dispatch_semaphore_wait", "_os_sync_wait_on_address"}
+# Tunic (Unity 2020.3): the few libSystem calls the shim answers. All are lazy binds in these binaries.
+#   _NSGetExecutablePath: Unity finds Contents/Resources/Data and Contents/PlugIns from it (the shim's game folder)
+#   _dlopen: plugin loads are logged (and mapped to Frameworks/ if a path ever misses the game folder)
+#   _sysctlbyname: Mac-like hardware answers, as for Cyberpunk
+#   _syslog$DARWIN_EXTSN: not exported by iOS's libSystem
+#   _CFBundleCopyExecutableURL (CoreFoundation): the main bundle's executable, for Unity, is the shim's Mac-style one
+REROUTE_TUNIC = {"__NSGetExecutablePath", "_dlopen", "_sysctlbyname", "_syslog$DARWIN_EXTSN", "_CFBundleCopyExecutableURL"}
 DYLIB_CMDS = (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD)
 PLATFORM_MACOS, PLATFORM_IOS = 1, 2
 
+PROFILE = "tunic"
 SHIM = "@rpath/libMacShim.dylib"
 # Frameworks whose macOS API surface is missing on iOS: send them to the shim.
 # The shim re-exports Foundation / CoreGraphics / Security, so anything iOS does have still resolves.
 SHIM_FRAMEWORKS = {"AppKit", "Cocoa", "IOKit", "Carbon", "AudioUnit", "CoreAudio",
                    "CoreGraphics", "Security", "Metal"}
+# Tunic adds: frameworks iOS lacks (OpenGL, CoreServices' Mac calls, Quartz, SecurityFoundation, ForceFeedback) and
+# ones where iOS misses a few symbols Unity binds at launch - the shim re-exports the real CoreVideo and AVFoundation
+# and adds CVDisplayLink / two AVCaptureSessionPreset constants. AudioUnit's functions live in iOS's AudioToolbox; the
+# shim wraps them to swap the Mac HAL output unit for RemoteIO. Checked against the iOS 16.5 SDK stubs (.tbd).
+SHIM_FRAMEWORKS_TUNIC = SHIM_FRAMEWORKS | {"CoreServices", "OpenGL", "CoreVideo", "AVFoundation", "Quartz",
+                                           "SecurityFoundation", "ForceFeedback"}
 SHIM_DYLIBS = {"/usr/lib/libcurl.4.dylib"}   # not shipped on iOS: shim provides an offline stub
+# GameAssembly links no framework the shim replaces; its libiconv dependency becomes the shim (which re-exports
+# libiconv), so its _NSGetExecutablePath and _dlopen (P/Invoke into the plugins) reach the shim too
+SHIM_DYLIBS_TUNIC = SHIM_DYLIBS | {"/usr/lib/libiconv.2.dylib"}
 
 FW_RE = re.compile(r"^/System/Library/Frameworks/(\w+)\.framework/Versions/[A-Z]/\1$")
 
@@ -65,13 +86,15 @@ def ver(s):
     return (p[0] << 16) | (p[1] << 8) | p[2]
 
 def map_dylib(p):
+    tunic = PROFILE == "tunic"
     m = FW_RE.match(p)
     if m:
-        return SHIM if m.group(1) in SHIM_FRAMEWORKS else "/System/Library/Frameworks/%s.framework/%s" % (m.group(1), m.group(1))
-    if p in SHIM_DYLIBS:
+        return SHIM if m.group(1) in (SHIM_FRAMEWORKS_TUNIC if tunic else SHIM_FRAMEWORKS) else "/System/Library/Frameworks/%s.framework/%s" % (m.group(1), m.group(1))
+    if p in (SHIM_DYLIBS_TUNIC if tunic else SHIM_DYLIBS):
         return SHIM
     if p.startswith("@executable_path/../Frameworks/"):
-        return "@rpath/" + p[len("@executable_path/../Frameworks/"):]
+        # Tunic's binaries carry no LC_RPATH, so no @rpath: everything sits in the app's Frameworks folder
+        return ("@executable_path/Frameworks/" if tunic else "@rpath/") + p[len("@executable_path/../Frameworks/"):]
     return None
 
 def map_rpath(p):
@@ -118,7 +141,10 @@ def info(path):
             print("  code_signature (stale after retarget; re-sign)")
 
 def retarget(src, dst, minos, sdk):
+    global SHIM
     d = bytearray(thin_arm64(open(src, "rb").read())); m = parse(d); log = []; seen = False
+    if PROFILE == "tunic":      # executable at the app root, every library and plugin in Frameworks/ next to the shim
+        SHIM = "@executable_path/Frameworks/libMacShim.dylib" if m["ftype"] == 2 else "@loader_path/libMacShim.dylib"
     for cmd, off, sz in m["cmds"]:
         if cmd == LC_VERSION_MIN_MACOSX:
             raise SystemExit("legacy LC_VERSION_MIN_MACOSX binary: unsupported")
@@ -137,7 +163,8 @@ def retarget(src, dst, minos, sdk):
                 log.append("%s -> %s" % (old, new))
     if not seen: raise SystemExit("no LC_BUILD_VERSION: not a modern macOS build")
     log += reroute_imports(d, m)
-    if m["ftype"] == 2: log += patch_pool_end(d, m) + patch_watchdog(d, m) + patch_pool_sizes(d, m) + patch_free_hook(d, m)      # MH_EXECUTE
+    if PROFILE == "tunic": log += reroute_lazy(d, m, REROUTE_TUNIC)
+    if m["ftype"] == 2 and PROFILE == "cyberpunk": log += patch_pool_end(d, m) + patch_watchdog(d, m) + patch_pool_sizes(d, m) + patch_free_hook(d, m)      # MH_EXECUTE
     log += dedupe_dylibs(d, m)          # last: it moves load commands, so m["cmds"] offsets are stale afterwards
     open(dst, "wb").write(d)
     return log
@@ -168,6 +195,46 @@ def reroute_imports(d, m):
             else:        struct.pack_into("<I", d, p, (v & ~0xff) | ordinal)
             done.append(name)
     return ["rerouted to shim (ordinal %d): %s" % (ordinal, ", ".join(sorted(set(done))))] if done else []
+
+def reroute_lazy(d, m, names):
+    """dyld-info images: point the lazy-bind records of `names` at the shim. Every lazy record carries its own
+    SET_DYLIB_ORDINAL opcode (record = segment/offset, ordinal, symbol, DO_BIND, DONE), so the ordinal is rewritten in
+    place with the same byte length - nothing in __LINKEDIT moves. Non-lazy binds share ordinals and are left alone."""
+    ordinal, n = None, 0
+    for cmd, off, sz in m["cmds"]:
+        if cmd in DYLIB_CMDS:
+            n += 1
+            if ordinal is None and name_of(d, off, sz)[1] == SHIM: ordinal = n
+    info = [off for cmd, off, sz in m["cmds"] if cmd in (0x22, 0x80000022)]
+    if not info or ordinal is None: return []
+    lazy_off, lazy_size = struct.unpack_from("<II", d, info[0] + 8 + 24)
+    def uleb(i):
+        v = sh = 0
+        while True:
+            b = d[i]; i += 1; v |= (b & 0x7f) << sh; sh += 7
+            if not b & 0x80: return v, i
+    done, skipped, i, end = [], [], lazy_off, lazy_off + lazy_size
+    ord_at = ord_len = None                                     # this record's ordinal opcode (None until seen)
+    while i < end:
+        b = d[i]; op, imm = b & 0xf0, b & 0x0f; at = i; i += 1
+        if op == 0x00: ord_at = None                                                    # DONE: next record
+        elif op == 0x10: ord_at, ord_len = at, 0                                        # SET_DYLIB_ORDINAL_IMM
+        elif op == 0x20: j = uleb(i)[1]; ord_at, ord_len = at, j - i; i = j             # SET_DYLIB_ORDINAL_ULEB
+        elif op == 0x30: ord_at = None                                                  # special (self / flat): leave
+        elif op == 0x40:                                                                # SET_SYMBOL_TRAILING_FLAGS_IMM
+            j = d.index(b"\0", i); sym = d[i:j].decode("utf-8", "replace"); i = j + 1
+            if sym not in names: continue
+            if ord_at is None: skipped.append(sym); continue
+            if ord_len == 0 and ordinal <= 15: d[ord_at] = 0x10 | ordinal
+            elif ord_len and ordinal < 1 << (7 * ord_len):
+                for k in range(ord_len): d[ord_at + 1 + k] = ((ordinal >> (7 * k)) & 0x7f) | (0x80 if k < ord_len - 1 else 0)
+            else: skipped.append(sym); continue
+            done.append(sym)
+        elif op in (0x60, 0x70, 0x80, 0xa0): i = uleb(i)[1]
+        elif op == 0xc0: i = uleb(uleb(i)[1])[1]
+    out = ["lazy binds rerouted to shim (ordinal %d): %s" % (ordinal, ", ".join(sorted(set(done))))] if done else []
+    if skipped: out.append("NOT rerouted (no own ordinal opcode / ordinal too big): " + ", ".join(sorted(set(skipped))))
+    return out
 
 def dedupe_dylibs(d, m):
     """Several macOS frameworks map to the same @rpath/libMacShim.dylib, which leaves duplicate LC_LOAD_DYLIB commands.
@@ -366,8 +433,9 @@ def patch_free_hook(d, m):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("src", nargs="?"); ap.add_argument("dst", nargs="?")
-    ap.add_argument("--info"); ap.add_argument("--minos", default="18.0"); ap.add_argument("--sdk", default="18.0")
-    a = ap.parse_args()
+    ap.add_argument("--info"); ap.add_argument("--minos", default="16.0"); ap.add_argument("--sdk", default="18.0")
+    ap.add_argument("--profile", choices=("tunic", "cyberpunk"), default="tunic")
+    a = ap.parse_args(); PROFILE = a.profile
     if a.info: info(a.info); sys.exit(0)
     if not (a.src and a.dst): ap.error("need IN OUT")
     for l in retarget(a.src, a.dst, a.minos, a.sdk): print("  " + l)

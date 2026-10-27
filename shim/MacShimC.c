@@ -50,11 +50,8 @@ EXPORT kern_return_t IOServiceAddInterestNotification(void *n, io_object_t s, co
 EXPORT void *IODisplayCreateInfoDictionary(io_object_t d, uint32_t opt)  { (void)d; (void)opt; return 0; }
 EXPORT kern_return_t IODisplayGetFloatParameter(io_object_t d, uint32_t opt, const void *name, float *v) { (void)d; (void)opt; (void)name; if (v) *v = 0; return kIOReturnUnsupported; }
 
-/* ============================== CoreAudio (AudioObject*) ============================== */
-#define kAudioHardwareUnknownPropertyError ((int32_t)0x77686F3F) /* 'who?' */
-EXPORT int32_t AudioObjectGetPropertyData(uint32_t o, const void *a, uint32_t qs, const void *q, uint32_t *sz, void *d) { (void)o; (void)a; (void)qs; (void)q; (void)sz; (void)d; return kAudioHardwareUnknownPropertyError; }
-EXPORT int32_t AudioObjectGetPropertyDataSize(uint32_t o, const void *a, uint32_t qs, const void *q, uint32_t *sz) { (void)o; (void)a; (void)qs; (void)q; if (sz) *sz = 0; return kAudioHardwareUnknownPropertyError; }
-EXPORT int32_t AudioObjectSetPropertyData(uint32_t o, const void *a, uint32_t qs, const void *q, uint32_t sz, const void *d) { (void)o; (void)a; (void)qs; (void)q; (void)sz; (void)d; return kAudioHardwareUnknownPropertyError; }
+/* ============================== CoreAudio (AudioObject*) ==============================
+ * Tunic: FMOD needs a working default output device, so the AudioObject* calls answer for one in UnityShimC.c. */
 
 /* ============================== CoreGraphics (macOS-only parts) ============================== */
 EXPORT const void *kCGDisplayShowDuplicateLowResolutionModes = 0;
