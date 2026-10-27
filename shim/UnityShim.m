@@ -328,7 +328,7 @@ static void um_nopSync3(id self, SEL _cmd, id t, NSUInteger slice, NSUInteger le
 static void um_nopRange(id self, SEL _cmd, NSRange r) {}
 static void um_textureBarrier(id self, SEL _cmd) {
     ((void (*)(id, SEL, NSUInteger, NSUInteger, NSUInteger))objc_msgSend)(self, @selector(memoryBarrierWithScope:afterStages:beforeStages:),
-        MTLBarrierScopeTextures | MTLBarrierScopeRenderTargets, MTLRenderStageFragment, MTLRenderStageFragment);
+        MTLBarrierScopeTextures, MTLRenderStageFragment, MTLRenderStageFragment);         /* RenderTargets scope: macOS only */
 }
 static void UMReplaceMacOnlyMetal(void) {
     struct { SEL sel; IMP imp; } fix[] = {
