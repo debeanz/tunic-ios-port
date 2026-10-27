@@ -13,6 +13,7 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
+#import <Metal/Metal.h>
 #import <CoreVideo/CVBase.h>
 #import <CoreVideo/CVReturn.h>
 #import <objc/runtime.h>
@@ -279,6 +280,29 @@ UM_EXPORT uint32_t um_glTexName(void *t) { return 0; }
 UM_EXPORT uint32_t um_glTexTarget(void *t) __asm("_CVOpenGLTextureGetTarget");
 UM_EXPORT uint32_t um_glTexTarget(void *t) { return 0; }
 
+/* ---------------------------------------------------------------- Metal: the Mac player's GPU checks
+ * Unity's Mac player only creates its Metal device when the GPU reports the macOS feature sets / GPU families
+ * (MTLFeatureSet_macOS_GPUFamily*, MTLGPUFamilyMac*). The same Apple GPU in an iPhone answers NO to those names, so
+ * Unity fell back to its Null device and drew nothing (unity_player.log, 8th device run: "NullGfxDevice"). The macOS
+ * sets (10000-10999) and the Mac / Mac Catalyst families answer YES; everything else is the GPU's real answer. */
+static IMP o_supportsFeatureSet, o_supportsFamily;
+static BOOL um_supportsFeatureSet(id self, SEL _cmd, NSUInteger set) {
+    if (set >= 10000 && set < 11000) return YES;
+    return ((BOOL (*)(id, SEL, NSUInteger))o_supportsFeatureSet)(self, _cmd, set);
+}
+static BOOL um_supportsFamily(id self, SEL _cmd, NSInteger family) {
+    if (family == 2001 || family == 2002 || family == 4001 || family == 4002) return YES;    /* Mac1, Mac2, MacCatalyst1/2 */
+    return ((BOOL (*)(id, SEL, NSInteger))o_supportsFamily)(self, _cmd, family);
+}
+static void UMMetalAsMac(void) {
+    id<MTLDevice> dev = MTLCreateSystemDefaultDevice(); if (!dev) { UMLog(@"no Metal device"); return; }
+    Class C = object_getClass(dev);
+    Method fs = class_getInstanceMethod(C, @selector(supportsFeatureSet:)), fam = class_getInstanceMethod(C, @selector(supportsFamily:));
+    if (fs && !o_supportsFeatureSet) o_supportsFeatureSet = method_setImplementation(fs, (IMP)um_supportsFeatureSet);
+    if (fam && !o_supportsFamily) o_supportsFamily = method_setImplementation(fam, (IMP)um_supportsFamily);
+    UMLog(@"Metal device %@ (%@): macOS feature sets and Mac GPU families reported as supported", dev.name, NSStringFromClass(C));
+}
+
 /* ---------------------------------------------------------------- audio session (UnityShimC.c "audio") */
 static void UMAudioUp(void) {
     static dispatch_once_t o;
@@ -341,6 +365,7 @@ static NSString *um_executablePath(NSBundle *self, SEL _cmd) {
 __attribute__((constructor)) static void UMInit(void) {
     @autoreleasepool {
         _dyld_register_func_for_add_image(UMImageAdded);          /* also called for every image already loaded */
+        UMMetalAsMac();
         Class B = NSBundle.class;
         o_bundlePath = method_setImplementation(class_getInstanceMethod(B, @selector(bundlePath)), (IMP)um_bundlePath);
         o_executablePath = method_setImplementation(class_getInstanceMethod(B, @selector(executablePath)), (IMP)um_executablePath);
