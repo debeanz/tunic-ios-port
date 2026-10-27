@@ -318,13 +318,60 @@ UM_EXPORT void um_NSLog(NSString *fmt, ...) {
     va_list ap; va_start(ap, fmt); NSString *s = [[NSString alloc] initWithFormat:fmt arguments:ap]; va_end(ap);
     MacShimLogC("NSLog", s.UTF8String ?: "");
 }
+/* macOS-only Metal calls that iOS's driver classes implement only to abort ("synchronizeResource: is not supported on
+   this platform", 11th device run - the first one where Unity drew). MacShim.m class_addMethod's no-ops for them, which
+   does nothing when the class already has the method, so every class that implements one gets it replaced here:
+   managed storage is already turned into shared storage, so synchronize / didModifyRange have nothing to do, and
+   textureBarrier becomes the iOS memory barrier between fragment passes. */
+static void um_nop1(id self, SEL _cmd, id a) {}
+static void um_nopSync3(id self, SEL _cmd, id t, NSUInteger slice, NSUInteger level) {}
+static void um_nopRange(id self, SEL _cmd, NSRange r) {}
+static void um_textureBarrier(id self, SEL _cmd) {
+    ((void (*)(id, SEL, NSUInteger, NSUInteger, NSUInteger))objc_msgSend)(self, @selector(memoryBarrierWithScope:afterStages:beforeStages:),
+        MTLBarrierScopeTextures | MTLBarrierScopeRenderTargets, MTLRenderStageFragment, MTLRenderStageFragment);
+}
+static void UMReplaceMacOnlyMetal(void) {
+    struct { SEL sel; IMP imp; } fix[] = {
+        { NSSelectorFromString(@"synchronizeResource:"), (IMP)um_nop1 },
+        { NSSelectorFromString(@"synchronizeTexture:slice:level:"), (IMP)um_nopSync3 },
+        { NSSelectorFromString(@"didModifyRange:"), (IMP)um_nopRange },
+        { NSSelectorFromString(@"textureBarrier"), (IMP)um_textureBarrier },
+    };
+    int n = objc_getClassList(NULL, 0); Class *all = (Class *)malloc(sizeof(Class) * n); n = objc_getClassList(all, n);
+    int replaced = 0;
+    for (int i = 0; i < n; i++) {
+        const char *cn = class_getName(all[i]);
+        if (!strstr(cn, "Encoder") && !strstr(cn, "Buffer") && !strstr(cn, "MTL") && !strstr(cn, "AGX") && !strstr(cn, "IOGPU")) continue;
+        for (size_t k = 0; k < sizeof fix / sizeof *fix; k++) {
+            unsigned int mc = 0; Method *ms = class_copyMethodList(all[i], &mc);      /* only methods the class itself defines */
+            for (unsigned int j = 0; j < mc; j++)
+                if (method_getName(ms[j]) == fix[k].sel && method_getImplementation(ms[j]) != fix[k].imp) {
+                    method_setImplementation(ms[j], fix[k].imp); replaced++;
+                    if (replaced <= 12) UMLog(@"macOS-only Metal call made safe: -[%s %@]", cn, NSStringFromSelector(fix[k].sel));
+                }
+            free(ms);
+        }
+    }
+    free(all);
+    UMLog(@"macOS-only Metal calls made safe in %d place(s)", replaced);
+}
+/* buffers around existing memory may still ask for managed storage (MacShim.m fixes the other creation calls) */
+static IMP o_noCopyBuf;
+static id um_noCopyBuf(id self, SEL c, void *p, NSUInteger len, NSUInteger o, id dealloc) {
+    if ((o & MTLResourceStorageModeMask) == (1u << MTLResourceStorageModeShift)) o = (o & ~MTLResourceStorageModeMask) | MTLResourceStorageModeShared;
+    return ((id (*)(id, SEL, void *, NSUInteger, NSUInteger, id))o_noCopyBuf)(self, c, p, len, o, dealloc);
+}
 static void UMMetalAsMac(void) {
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice(); if (!dev) { UMLog(@"no Metal device"); return; }
     Class C = object_getClass(dev);
     Method fs = class_getInstanceMethod(C, @selector(supportsFeatureSet:)), fam = class_getInstanceMethod(C, @selector(supportsFamily:));
     if (fs && !o_supportsFeatureSet) o_supportsFeatureSet = method_setImplementation(fs, (IMP)um_supportsFeatureSet);
     if (fam && !o_supportsFamily) o_supportsFamily = method_setImplementation(fam, (IMP)um_supportsFamily);
-    UMLog(@"Metal device %@ (%@): macOS feature sets and Mac GPU families reported as supported", dev.name, NSStringFromClass(C));
+    Method nc = class_getInstanceMethod(C, @selector(newBufferWithBytesNoCopy:length:options:deallocator:));
+    if (nc && !o_noCopyBuf) o_noCopyBuf = method_setImplementation(nc, (IMP)um_noCopyBuf);      /* wraps MacShim.m's logger */
+    UMLog(@"Metal device %@ (%@): macOS feature sets and Mac GPU families reported as supported; BC textures %@",
+          dev.name, NSStringFromClass(C), [dev respondsToSelector:@selector(supportsBCTextureCompression)] && dev.supportsBCTextureCompression ? @"supported" : @"NOT supported");
+    UMReplaceMacOnlyMetal();
 }
 
 /* ---------------------------------------------------------------- audio session (UnityShimC.c "audio") */
