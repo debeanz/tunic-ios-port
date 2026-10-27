@@ -13,11 +13,18 @@ Run the user's own GOG **Mac** copy of Tunic natively on iPhone/iPad the way CyP
 - Unity **2020.3.17f1**, **IL2CPP** (`Data/il2cpp_data`), bundle id `com.AndrewShouldice.SecretLegend` (internal name "Secret Legend"), app version 1.0. Nearly all assets are in one LZ4 `UnityFS` file `Data/data.unity3d` (934 MB). Audio: FMOD Studio banks in `StreamingAssets` (music_main.bank 379 MB).
 - Frameworks to shim or redirect (UnityPlayer): Cocoa/AppKit, Carbon, IOKit, IOSurface, OpenGL (unused under Metal; stub it), Quartz, SecurityFoundation, CoreServices, MediaToolbox, plus the iOS-available ones (Foundation, QuartzCore, GameController, AudioUnit, CoreAudio, AVFoundation, CoreMedia, CoreVideo, CoreGraphics, CFNetwork, Security, SystemConfiguration). InControlNative adds ForceFeedback and Carbon. fmodstudio adds Carbon, AudioUnit and CoreAudio.
 
+## How the build works (since 2026-10-27)
+- **Cloud (GitHub Actions, `.github/workflows/shim.yml`)**: `tools/build_shim.sh` compiles only `libMacShim.dylib` (shim + SwiftUI launcher) and `tools/check_shim.py` fails the build if any symbol in `tools/shim_needs.txt` isn't exported by the shim or a library it re-exports. No game files involved.
+- **PC**: `gh run download -n libMacShim -D build/shim`, then `py tools/make_ipa.py --game <pkg | Tunic.app | Contents>` -> `build/Tunic-unsigned.ipa`. It retargets the binaries (`ios_retarget.py` profile `tunic`), rewrites `tools/shim_needs.txt`, copies `Contents/Resources` to `Game/Resources` (`--no-data` leaves it out; the app then imports into Documents/Tunic), icon from `PlayerIcon.icns`.
+- **Unity binaries use dyld-info binds** (not chained fixups): libSystem/CF calls are rerouted through their lazy-bind records in place (`reroute_lazy`); frameworks iOS lacks or lacks symbols of go to the shim (`@loader_path/libMacShim.dylib`), which re-exports Foundation, CoreGraphics, Security, Metal, CoreVideo, AVFoundation, AudioToolbox, libiconv. GameAssembly reaches the shim through its libiconv dependency.
+- **Shim at runtime**: `NSApplicationMain` boots UIKit + launcher first, Play restarts `main()`; Unity gets a Mac-style folder `Library/Application Support/MacShim/Tunic.app` (empty `Contents/MacOS/Secret Legend`, `Contents/Resources` -> game folder, `Contents/PlugIns/X.bundle/Contents/MacOS/X` -> `Frameworks/X.dylib`, `Contents/Frameworks` -> app Frameworks). FMOD's Mac HAL output becomes RemoteIO with a fake CoreAudio device. Log: Files > Tunic > macshim.log.
+- The SwiftUI launcher is still CyPort's (Cyberpunk resolution list etc.); the Tunic-themed launcher and the added settings come after the game boots.
+
 ## Next steps
-1. Texture formats inside `data.unity3d` (BC/DXT vs ASTC): decides whether a convert-on-import step is needed for devices without BC support.
-2. Whether Unity 2020.3's Mac player runs its loop on the main thread (decides whether the game loop must move off it so overlays stay smooth).
-3. Steam API: GameAssembly never loads `steam_api`; check UnityPlayer doesn't either, then leave it out.
-4. Adapt `build.sh` / `tools/ios_retarget.py` from Cyberpunk to these binaries, and start the Unity-specific shim.
+1. First device test of the IPA: read macshim.log, fix what fails to load or crashes.
+2. Texture formats inside `data.unity3d` (BC/DXT vs ASTC): BC needs device support (A15+/M1 report it), else convert on import.
+3. Unity's Mac loop runs on the main thread (as Cyberpunk's): overlays must not hitch with it (framerate-independence rule).
+4. Tunic-themed launcher + the added settings + in-game gear panel.
 
 ## Rules the user set
 - **Settings:** keep all of CyPort's settings and behaviour unchanged (Resolution, Performance overlay Off/FPS/Detailed, Smooth frame pacing, Low-latency input, Look sensitivity, Cloud saves, Game data import/download, 🎮 pad toggle, restart "quit?" prompt). Only ADD the unity-ios-port mobile kit settings CyPort lacks, with the kit's labels and defaults (`~/.claude/plugins/cache/debeanz-ports/unity-ios-port/1.2.0/shared/mobile-kit/MobileSettings.cs`, `MobileDisplay.cs`):

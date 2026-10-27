@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build libMacShim.dylib
-        run: tools/build_shim.sh build/shim
+        run: bash tools/build_shim.sh build/shim
       - uses: actions/upload-artifact@v4
         with:
           name: libMacShim
