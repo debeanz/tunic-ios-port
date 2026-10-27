@@ -637,8 +637,9 @@ static void MSLeftPress(int by, BOOL down) {
     _layer = l; if (!l) return;
     MSLogf(@"%@ setLayer: %@", NSStringFromClass(self.class), NSStringFromClass(l.class));
     MSOnMain(^{ l.contentsScale = UIScreen.mainScreen.nativeScale; l.frame = self.host.bounds; [self.host.layer addSublayer:l]; });
-    /* start screen "Performance overlay: Detailed" also turns on Apple's Metal HUD for the game's layer */
-    if ([l isKindOfClass:CAMetalLayer.class] && MSPref(@"MacShimOverlay", 1) == 2 && [l respondsToSelector:NSSelectorFromString(@"setDeveloperHUDProperties:")])
+    /* start screen "Performance overlay: Detailed" or the "Metal HUD" switch turns on Apple's Metal HUD for the game's layer */
+    BOOL hud = MSPref(@"MacShimOverlay", 1) == 2 || [NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"];
+    if ([l isKindOfClass:CAMetalLayer.class] && hud && [l respondsToSelector:NSSelectorFromString(@"setDeveloperHUDProperties:")])
         [l setValue:@{ @"mode": @"default" } forKey:@"developerHUDProperties"];
 }
 - (void)setHidden:(BOOL)h { _hidden = h; MSOnMain(^{ self.host.hidden = h; }); }

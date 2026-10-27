@@ -379,7 +379,9 @@ static void UMAudioUp(void) {
     static dispatch_once_t o;
     dispatch_once(&o, ^{
         AVAudioSession *s = AVAudioSession.sharedInstance; NSError *e = nil;
-        [s setCategory:AVAudioSessionCategorySoloAmbient error:&e];               /* game audio: follows the silent switch */
+        /* Playback: sound even with the phone set to silent (SoloAmbient went quiet with the silent switch - first
+           playable run had no audio). Other apps' audio stops while the game plays. */
+        [s setCategory:AVAudioSessionCategoryPlayback error:&e];
         [s setPreferredSampleRate:48000 error:nil];
         [s setPreferredIOBufferDuration:512.0 / 48000 error:nil];
         if (![s setActive:YES error:&e]) UMLog(@"audio session not active: %@", e.localizedDescription);

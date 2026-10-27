@@ -360,9 +360,50 @@ EXPORT OSStatus AudioOutputUnitStart(void *u) { AT(OSStatus, "AudioOutputUnitSta
 EXPORT OSStatus AudioOutputUnitStop(void *u) { AT(OSStatus, "AudioOutputUnitStop", (void *)); return real(u); }
 EXPORT OSStatus AudioUnitRender(void *u, uint32_t *flags, const void *ts, uint32_t bus, uint32_t frames, void *data) {
     AT(OSStatus, "AudioUnitRender", (void *, uint32_t *, const void *, uint32_t, uint32_t, void *)); return real(u, flags, ts, bus, frames, data); }
+/* What FMOD hands to the output: format, and every ~5 s how loud it is (12th device run: game ran, no sound heard). The
+   render callback is wrapped; the wrapper only reads the samples FMOD just wrote. */
+typedef OSStatus (*MSRenderProc)(void *ref, uint32_t *flags, const void *ts, uint32_t bus, uint32_t frames, void *abl);
+static MSRenderProc g_fmodProc; static void *g_fmodRef; static uint32_t g_fmtFlags, g_fmtBits, g_fmtCh; static double g_fmtRate;
+static OSStatus ms_render(void *ref, uint32_t *flags, const void *ts, uint32_t bus, uint32_t frames, void *abl) {
+    (void)ref;
+    OSStatus r = g_fmodProc ? g_fmodProc(g_fmodRef, flags, ts, bus, frames, abl) : -1;
+    static uint64_t total, next = 48000 * 2; static float peak; static uint32_t calls, silentFlag;
+    total += frames; calls++;
+    if (flags && (*flags & 0x10)) silentFlag++;                         /* kAudioUnitRenderAction_OutputIsSilence */
+    if (abl && (g_fmtFlags & 1) && g_fmtBits == 32) {                   /* float samples */
+        uint32_t nb = *(uint32_t *)abl;
+        for (uint32_t b = 0; b < nb && b < 8; b++) {
+            const uint8_t *buf = (const uint8_t *)abl + 8 + 16 * b;
+            uint32_t bytes = *(const uint32_t *)(buf + 4); const float *s = *(float *const *)(buf + 8);
+            for (uint32_t i = 0; s && i < bytes / 4; i += 7) { float v = s[i] < 0 ? -s[i] : s[i]; if (v > peak) peak = v; }
+        }
+    }
+    if (total >= next) {
+        char m[160]; snprintf(m, sizeof m, "%u callbacks, %u frames each, peak %.3f%s, result %d", calls, frames, peak,
+                              silentFlag ? " (marked silent)" : "", (int)r);
+        MacShimLogC("audio: FMOD output", m);
+        next = total + 48000 * 5; peak = 0; calls = 0; silentFlag = 0;
+    }
+    return r;
+}
 EXPORT OSStatus AudioUnitSetProperty(void *u, uint32_t id, uint32_t scope, uint32_t el, const void *d, uint32_t sz) {
     AT(OSStatus, "AudioUnitSetProperty", (void *, uint32_t, uint32_t, uint32_t, const void *, uint32_t));
     if (id == kAudioOutputUnitProperty_CurrentDevice) return 0;           /* HAL only: RemoteIO is always the speaker/route */
+    if (id == 8 && d && sz >= 40) {                                       /* kAudioUnitProperty_StreamFormat */
+        const MSASBD *f = (const MSASBD *)d; char m[128];
+        if (scope == 1) { g_fmtFlags = f->flags; g_fmtBits = f->bits; g_fmtCh = f->channels; g_fmtRate = f->rate; }
+        snprintf(m, sizeof m, "scope %u el %u: %.0f Hz, %u ch, %u bit, flags %#x", scope, el, f->rate, f->channels, f->bits, f->flags);
+        MacShimLogC("audio: stream format", m);
+    }
+    if (id == 23 && d && sz >= 16) {                                      /* kAudioUnitProperty_SetRenderCallback */
+        const void *const *cb = (const void *const *)d;
+        if (cb[0] && cb[0] != (const void *)ms_render) {
+            g_fmodProc = (MSRenderProc)cb[0]; g_fmodRef = (void *)cb[1];
+            const void *mine[2] = { (const void *)ms_render, cb[1] };
+            MacShimLogC("audio", "render callback wrapped (level meter)");
+            return real(u, id, scope, el, mine, sz);
+        }
+    }
     OSStatus r = real(u, id, scope, el, d, sz);
     if (r) { char b[48]; snprintf(b, sizeof b, "property %u scope %u el %u -> %d", id, scope, el, (int)r); MacShimLogC("audio: AudioUnitSetProperty failed", b); }
     return r;
