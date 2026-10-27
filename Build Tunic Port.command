@@ -1,8 +1,8 @@
 #!/bin/bash
-# Double-click me (right-click > Open the first time). Builds CyPort from your own GOG copy of Cyberpunk 2077 for Mac.
+# Double-click me (right-click > Open the first time). Builds tunic-ios-port from your own GOG copy of Tunic for Mac.
 cd "$(dirname "$0")"
 if [ -z "${GAME_APP:-}" ]; then
-  echo "Drag your Cyberpunk2077.app (from the GOG 'Cyberpunk 2077' folder) into this window and press Return:"
+  echo "Drag your Tunic.app (from the GOG 'Tunic' folder) into this window and press Return:"
   read -r GAME_APP; GAME_APP="${GAME_APP%/}"; GAME_APP="${GAME_APP//\\ / }"; GAME_APP="${GAME_APP%\'}"; GAME_APP="${GAME_APP#\'}"
 fi
 export GAME_APP

@@ -1,0 +1,11 @@
+# scripts run on macOS: always LF, even when checked out on Windows
+*.sh text eol=lf
+*.command text eol=lf
+*.py text eol=lf
+*.plist text eol=lf
+*.swift text eol=lf
+*.m text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.inc text eol=lf
+*.dylib binary

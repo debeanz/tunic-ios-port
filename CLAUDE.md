@@ -4,7 +4,7 @@ Run the user's own GOG **Mac** copy of Tunic natively on iPhone/iPad the way CyP
 
 ## Layout
 - `tunic_enUS_1_0_t1483_b37_59078.pkg` — the user's GOG Mac installer (1.5 GB). Never commit or redistribute.
-- Repo root = this folder, GitHub `debeanz/tunic-ios-port` (public). Code copied from https://github.com/Thijs2004/CyPort (MIT, commit 65e2e57), not forked: retargeter (`tools/ios_retarget.py`), shim (`shim/`), launcher (`app/`), `build.sh`, `Build CyPort.command` (rename once adapted). Keep CyPort's LICENSE line and credit. CyPort's original README is `docs/CYPORT_README.md`; its Cyberpunk-style icons were removed (Tunic's icon comes from the user's copy at build time).
+- Repo root = this folder, GitHub `debeanz/tunic-ios-port` (public). Code copied from https://github.com/Thijs2004/CyPort (MIT, commit 65e2e57), not forked: retargeter (`tools/ios_retarget.py`), shim (`shim/`), launcher (`app/`), `build.sh`, `Build Tunic Port.command` (double-click launcher; `build.sh` behind it is still CyPort's and needs adapting). Keep CyPort's LICENSE line and credit. CyPort's original README is `docs/CYPORT_README.md`; its Cyberpunk-style icons were removed (Tunic's icon comes from the user's copy at build time).
 
 ## Next steps
 1. Extract the `.pkg` (e.g. 7-Zip or xar + cpio/pbzx) into its own folder and find `Tunic.app`.
