@@ -4276,6 +4276,19 @@ static void MSSignal(int sig) {
     if (g_logfd >= 0) {
         char num[16]; int n = 0, v = sig; char t[8]; do { t[n++] = '0' + v % 10; v /= 10; } while (v); for (int i = 0; i < n; i++) num[i] = t[n - 1 - i]; num[n] = '\n';
         write(g_logfd, hdr, sizeof hdr - 1); write(g_logfd, num, n + 1);
+        /* the reason libraries record before abort() (malloc: "pointer being freed was not allocated", libc++abi:
+           uncaught exception, ...) lives in each image's __DATA,__crash_info section - what iOS crash reports show */
+        for (uint32_t k = 0; k < _dyld_image_count(); k++) {
+            unsigned long csz = 0;
+            const uint64_t *ci = (const uint64_t *)getsectiondata((const struct mach_header_64 *)_dyld_get_image_header(k), "__DATA", "__crash_info", &csz);
+            if (!ci || csz < 40) continue;
+            for (int f = 1; f <= 4; f += 3) {                            /* message, message2 */
+                const char *m = (const char *)(uintptr_t)ci[f]; if (!m || !*m) continue;
+                const char *img = strrchr(_dyld_get_image_name(k), '/');
+                write(g_logfd, "*** crash info (", 16); write(g_logfd, img ? img + 1 : "?", strlen(img ? img + 1 : "?"));
+                write(g_logfd, "): ", 3); write(g_logfd, m, strnlen(m, 1024)); write(g_logfd, "\n", 1);
+            }
+        }
         void *frames[64]; int c = backtrace(frames, 64); backtrace_symbols_fd(frames, c, g_logfd); fsync(g_logfd);
     }
     signal(sig, SIG_DFL); raise(sig);
