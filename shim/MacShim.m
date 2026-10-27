@@ -622,8 +622,18 @@ static void MSLeftPress(int by, BOOL down) {
 - (void)setFrameOrigin:(CGPoint)p { [self setFrame:CGRectMake(p.x, p.y, _frame.size.width, _frame.size.height)]; }
 - (void)addSubview:(NSView *)v { [_subviews addObject:v]; v.superview = self; MSOnMain(^{ [self.host addSubview:v.host]; v.host.frame = MSUIFromAK(v.frame); }); }
 - (void)removeFromSuperview { NSView *s = _superview; [s.subviews removeObject:self]; _superview = nil; MSOnMain(^{ [self.host removeFromSuperview]; }); }
-- (void)setWantsLayer:(BOOL)b { _wantsLayer = b; }
-- (CALayer *)layer { return _layer ?: _host.layer; }
+/* Layer-backed views: AppKit asks the view for its backing layer (makeBackingLayer) when it becomes layer-backed.
+   Unity's PlayerWindowView returns its CAMetalLayer from there; without this call Unity never got a layer and drew
+   0 frames (Tunic, 6th device run). */
+- (void)msMakeBackingLayer {
+    static __thread BOOL making;                 /* makeBackingLayer may ask for [self layer] itself */
+    if (making || _layer || !_wantsLayer || ![self respondsToSelector:@selector(makeBackingLayer)]) return;
+    making = YES; CALayer *l = ((CALayer *(*)(id, SEL))objc_msgSend)(self, @selector(makeBackingLayer)); making = NO;
+    MSLogf(@"%@ makeBackingLayer -> %@", NSStringFromClass(self.class), l ? NSStringFromClass(l.class) : @"nil");
+    if (l) [self setLayer:l];
+}
+- (void)setWantsLayer:(BOOL)b { _wantsLayer = b; if (b) [self msMakeBackingLayer]; }
+- (CALayer *)layer { if (!_layer) [self msMakeBackingLayer]; return _layer ?: _host.layer; }
 - (void)setLayer:(CALayer *)l {
     _layer = l; if (!l) return;
     MSOnMain(^{ l.contentsScale = UIScreen.mainScreen.nativeScale; l.frame = self.host.bounds; [self.host.layer addSublayer:l]; });
