@@ -636,6 +636,7 @@ static void MSLeftPress(int by, BOOL down) {
 - (CALayer *)layer { if (!_layer) [self msMakeBackingLayer]; return _layer ?: _host.layer; }
 - (void)setLayer:(CALayer *)l {
     _layer = l; if (!l) return;
+    MSLogf(@"%@ setLayer: %@", NSStringFromClass(self.class), NSStringFromClass(l.class));
     MSOnMain(^{ l.contentsScale = UIScreen.mainScreen.nativeScale; l.frame = self.host.bounds; [self.host.layer addSublayer:l]; });
     /* start screen "Performance overlay: Detailed" also turns on Apple's Metal HUD for the game's layer */
     if ([l isKindOfClass:CAMetalLayer.class] && MSPref(@"MacShimOverlay", 1) == 2 && [l respondsToSelector:NSSelectorFromString(@"setDeveloperHUDProperties:")])
@@ -1967,6 +1968,15 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
        every dispatch to the main queue would be stuck for the whole game. */
     void (^start)(void) = ^{
         MSLogf(@"launch finished; starting the game's main()");
+        {   /* Unity's own log (graphics setup, errors) next to macshim.log: -logFile <Documents/unity_player.log>
+               (it would go to Library/Logs deep inside the container) */
+            static char *args[64]; int n = 0, argc = *_NSGetArgc(); char **argv = *_NSGetArgv();
+            for (int i = 0; i < argc && n < 60; i++) args[n++] = argv[i];
+            NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+            args[n++] = "-logFile"; args[n++] = strdup([docs stringByAppendingPathComponent:@"unity_player.log"].fileSystemRepresentation);
+            args[n] = NULL; *_NSGetArgv() = args; *_NSGetArgc() = n;
+            MSLogf(@"Unity log: %s", args[n - 1]);
+        }
         /* iOS gives the main thread a 1 MB stack, macOS 8 MB, and the game runs its whole loop on the main thread.
            Run it on a big stack of its own (still the main thread) with a no-access guard below. */
         double mb = MSCfgD(@"MainStackMB", 64); int r;
