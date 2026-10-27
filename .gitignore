@@ -1,0 +1,15 @@
+# build output and anything from the game - never commit game files
+build/
+*.ipa
+Payload/
+*.mobileprovision
+*.dSYM
+.DS_Store
+*.bak*
+build-signed/
+
+# the game itself: installers, extracted app and imported data stay local
+*.pkg
+*.app/
+game/
+extracted/
