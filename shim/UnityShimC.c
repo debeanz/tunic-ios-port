@@ -82,8 +82,9 @@ EXPORT mach_port_t IORegisterForSystemPower(void *ref, void **port, void *cb, io
     (void)ref; (void)cb; if (port) *port = &g_notify_port_token; if (notifier) *notifier = 0; return 0; }
 EXPORT kern_return_t IOAllowPowerChange(mach_port_t k, long id) { (void)k; (void)id; return 0; }
 EXPORT kern_return_t IOCancelPowerChange(mach_port_t k, long id) { (void)k; (void)id; return 0; }
-EXPORT CFTypeRef IOPSCopyPowerSourcesInfo(void) { return 0; }
-EXPORT CFTypeRef IOPSCopyPowerSourcesList(CFTypeRef blob) { (void)blob; return 0; }
+/* empty but real: Unity reads these without NULL checks (as it did the keyboard layout data) */
+EXPORT CFTypeRef IOPSCopyPowerSourcesInfo(void) { return CFDictionaryCreateMutable(0, 0, 0, 0); }
+EXPORT CFTypeRef IOPSCopyPowerSourcesList(CFTypeRef blob) { (void)blob; return CFArrayCreate(0, 0, 0, 0); }
 EXPORT int32_t IOPMAssertionCreateWithName(CFTypeRef type, uint32_t level, CFTypeRef name, uint32_t *id) { (void)type; (void)level; (void)name; if (id) *id = 1; return 0; }
 EXPORT int32_t IOPMAssertionRelease(uint32_t id) { (void)id; return 0; }
 

@@ -47,7 +47,9 @@ EXPORT void *IONotificationPortCreate(mach_port_t p)                     { (void
 EXPORT void IONotificationPortDestroy(void *n)                           { (void)n; }
 EXPORT void IONotificationPortSetDispatchQueue(void *n, void *q)         { (void)n; (void)q; }
 EXPORT kern_return_t IOServiceAddInterestNotification(void *n, io_object_t s, const char *t, void *cb, void *ref, io_object_t *o) { (void)n; (void)s; (void)t; (void)cb; (void)ref; if (o) *o = 0; return kIOReturnUnsupported; }
-EXPORT void *IODisplayCreateInfoDictionary(io_object_t d, uint32_t opt)  { (void)d; (void)opt; return 0; }
+extern void *CFDictionaryCreateMutable(const void *alloc, long cap, const void *kcb, const void *vcb);
+/* an empty dictionary, not NULL: Unity looks its display name up in it without a NULL check */
+EXPORT void *IODisplayCreateInfoDictionary(io_object_t d, uint32_t opt)  { (void)d; (void)opt; return CFDictionaryCreateMutable(0, 0, 0, 0); }
 EXPORT kern_return_t IODisplayGetFloatParameter(io_object_t d, uint32_t opt, const void *name, float *v) { (void)d; (void)opt; (void)name; if (v) *v = 0; return kIOReturnUnsupported; }
 
 /* ============================== CoreAudio (AudioObject*) ==============================
