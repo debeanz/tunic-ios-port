@@ -60,8 +60,10 @@ REROUTE = {"__NSGetExecutablePath", "_sysctlbyname", "_mmap", "_munmap", "_madvi
 #   _CFBundleCopyExecutableURL (CoreFoundation): the main bundle's executable, for Unity, is the shim's Mac-style one
 #   _pthread_get_stackaddr_np: IL2CPP's garbage collector takes the main thread's stack bottom from it, but the game runs
 #     on the shim's big stack - it scanned from there to the real stack and faulted in il2cpp_init (first device run)
+#   _NSLog (Foundation): Unity reports its Metal device setup with NSLog, which on iOS only reaches the system log -
+#     the shim copies every line into macshim.log
 REROUTE_TUNIC = {"__NSGetExecutablePath", "_dlopen", "_sysctlbyname", "_syslog$DARWIN_EXTSN", "_CFBundleCopyExecutableURL",
-                 "_pthread_get_stackaddr_np"}
+                 "_pthread_get_stackaddr_np", "_NSLog"}
 DYLIB_CMDS = (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD)
 PLATFORM_MACOS, PLATFORM_IOS = 1, 2
 

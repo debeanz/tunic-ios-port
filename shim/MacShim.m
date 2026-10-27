@@ -4256,7 +4256,7 @@ static void MSLogf(NSString *fmt, ...) {
     /* no fsync per line (it blocks the calling thread, often a game thread): write() survives an app crash, and the
        crash handler syncs itself. ConsoleLog = YES also sends every line to the system log. */
     static int console = -1; if (console < 0) console = [MSConfig()[@"ConsoleLog"] boolValue];
-    if (console) NSLog(@"[MacShim] %@", m);
+    if (console) fprintf(stderr, "[MacShim] %s\n", m.UTF8String);       /* not NSLog: the shim's NSLog logs back into here */
     if (![m hasPrefix:@"progress:"]) MSTailAdd(m);
     if (g_logfd >= 0) { NSString *l = [NSString stringWithFormat:@"%.3f %@\n", CACurrentMediaTime(), m]; const char *c = l.UTF8String; write(g_logfd, c, strlen(c)); }
 }

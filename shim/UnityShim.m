@@ -302,6 +302,22 @@ UM_EXPORT NSArray *um_MTLCopyAllDevices(void) {
     static int said; if (!said++) UMLog(@"MTLCopyAllDevices -> %@", d.name ?: @"no device");
     return (__bridge NSArray *)CFBridgingRetain(d ? @[ d ] : @[]);
 }
+/* CGDirectDisplayCopyCurrentMetalDevice: the GPU driving a display (macOS only). Unity dlsym's it while choosing its
+   graphics device (10th device run: still Null device after MTLCopyAllDevices answered). Returned retained. */
+UM_EXPORT id um_CGDirectDisplayCopyCurrentMetalDevice(uint32_t display) __asm("_CGDirectDisplayCopyCurrentMetalDevice");
+UM_EXPORT id um_CGDirectDisplayCopyCurrentMetalDevice(uint32_t display) {
+    id<MTLDevice> d = MTLCreateSystemDefaultDevice();
+    static int said; if (!said++) UMLog(@"CGDirectDisplayCopyCurrentMetalDevice(%u) -> %@", display, d.name ?: @"no device");
+    return d ? (__bridge id)CFBridgingRetain(d) : nil;
+}
+/* NSLog -> macshim.log too: Unity's Metal setup messages ("Metal devices available: %d", ...) only went to the system
+   log. UnityPlayer's lazy bind of NSLog is pointed here by tools/ios_retarget.py. */
+UM_EXPORT void um_NSLog(NSString *fmt, ...) __asm("_NSLog");
+UM_EXPORT void um_NSLog(NSString *fmt, ...) {
+    if (!fmt) return;
+    va_list ap; va_start(ap, fmt); NSString *s = [[NSString alloc] initWithFormat:fmt arguments:ap]; va_end(ap);
+    MacShimLogC("NSLog", s.UTF8String ?: "");
+}
 static void UMMetalAsMac(void) {
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice(); if (!dev) { UMLog(@"no Metal device"); return; }
     Class C = object_getClass(dev);
