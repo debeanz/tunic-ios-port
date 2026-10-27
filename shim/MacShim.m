@@ -1412,7 +1412,16 @@ static void *g_gameMain;                        /* main() of the game, from LC_M
 static BOOL MSCalledFromGameMain(void *ret) {
     static dispatch_once_t o;
     dispatch_once(&o, ^{
+        /* The game's executable: image 0 normally, but under LiveContainer image 0 is LiveContainer itself and the game
+           is loaded later - restarting image 0's main() relaunched LiveContainer (seen 2026-10-27: back to the start
+           screen after Play). Find the image at the app's executable path instead. */
         const struct mach_header_64 *h = (const struct mach_header_64 *)_dyld_get_image_header(0);
+        char want[PATH_MAX]; const char *exe = NSBundle.mainBundle.executablePath.fileSystemRepresentation;
+        if (exe && realpath(exe, want))
+            for (uint32_t k = 0; k < _dyld_image_count(); k++) {
+                char got[PATH_MAX]; const char *n = _dyld_get_image_name(k);
+                if (n && realpath(n, got) && !strcmp(got, want)) { h = (const struct mach_header_64 *)_dyld_get_image_header(k); break; }
+            }
         const struct load_command *lc = (const struct load_command *)(h + 1);
         for (uint32_t i = 0; i < h->ncmds; i++, lc = (const struct load_command *)((const char *)lc + lc->cmdsize))
             if (lc->cmd == LC_MAIN) g_gameMain = (char *)h + ((const struct entry_point_command *)lc)->entryoff;
