@@ -58,7 +58,10 @@ REROUTE = {"__NSGetExecutablePath", "_sysctlbyname", "_mmap", "_munmap", "_madvi
 #   _sysctlbyname: Mac-like hardware answers, as for Cyberpunk
 #   _syslog$DARWIN_EXTSN: not exported by iOS's libSystem
 #   _CFBundleCopyExecutableURL (CoreFoundation): the main bundle's executable, for Unity, is the shim's Mac-style one
-REROUTE_TUNIC = {"__NSGetExecutablePath", "_dlopen", "_sysctlbyname", "_syslog$DARWIN_EXTSN", "_CFBundleCopyExecutableURL"}
+#   _pthread_get_stackaddr_np: IL2CPP's garbage collector takes the main thread's stack bottom from it, but the game runs
+#     on the shim's big stack - it scanned from there to the real stack and faulted in il2cpp_init (first device run)
+REROUTE_TUNIC = {"__NSGetExecutablePath", "_dlopen", "_sysctlbyname", "_syslog$DARWIN_EXTSN", "_CFBundleCopyExecutableURL",
+                 "_pthread_get_stackaddr_np"}
 DYLIB_CMDS = (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD)
 PLATFORM_MACOS, PLATFORM_IOS = 1, 2
 

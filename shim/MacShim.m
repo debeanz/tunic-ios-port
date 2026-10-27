@@ -1907,6 +1907,22 @@ static void MSWatchGameSettings(void) {
     dispatch_resume(src); dispatch_resume(tick);
     MSLogf(@"watching in-game settings for changes that need a restart");
 }
+/* The game's main thread runs on the shim's big stack (below). IL2CPP's garbage collector takes the main thread's stack
+   bottom from pthread_get_stackaddr_np and scans everything between the current stack pointer and it: with the real
+   (UIKit) stack's bottom it ran past the big stack into unmapped memory and crashed in il2cpp_init. GameAssembly's
+   lazy bind of it is pointed here by tools/ios_retarget.py; other threads get the real answer. */
+static char *volatile g_gameStackTop; static pthread_t volatile g_gameThread;
+void *ms_pthread_get_stackaddr_np(pthread_t t) __asm("_pthread_get_stackaddr_np");
+void *ms_pthread_get_stackaddr_np(pthread_t t) {
+    static void *(*real)(pthread_t);
+    if (!real) real = (void *(*)(pthread_t))dlsym(dlopen("/usr/lib/system/libsystem_pthread.dylib", RTLD_LAZY | RTLD_NOLOAD), "pthread_get_stackaddr_np");
+    if (g_gameStackTop && t == g_gameThread) {
+        static int said; if (!said++) MSLogf(@"pthread_get_stackaddr_np(game main thread) -> the game's own stack top %p", g_gameStackTop);
+        return g_gameStackTop;
+    }
+    return real ? real(t) : NULL;
+}
+
 @interface MSBootDelegate : MSUIDelegate @end
 @implementation MSBootDelegate
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opts {
@@ -1950,6 +1966,7 @@ static void MSWatchGameSettings(void) {
             if (vm_allocate(mach_task_self(), &va, sz + guard, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) st = (char *)va;
             if (st != MAP_FAILED) {
                 vm_protect(mach_task_self(), va, guard, FALSE, VM_PROT_NONE);
+                g_gameStackTop = st + sz + guard; g_gameThread = pthread_self();     /* for pthread_get_stackaddr_np below */
                 MSLogf(@"game main thread runs on a %.0f MB stack at %p", mb, st + guard);
                 r = MSCallOnStack(st + sz + guard, g_gameMain);
             } else r = ((int (*)(int, char **, char **, const char **))g_gameMain)(*_NSGetArgc(), *_NSGetArgv(), *_NSGetEnviron(), NULL);
