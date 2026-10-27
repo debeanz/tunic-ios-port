@@ -185,6 +185,18 @@ static CGPoint UMPointToScreen(id self, SEL _cmd, CGPoint p) { CGRect f = UMFram
 static CGPoint UMPointFromScreen(id self, SEL _cmd, CGPoint p) { CGRect f = UMFrame(self); return CGPointMake(p.x - f.origin.x, p.y - f.origin.y); }
 static CGPoint UMMouseInWindow(id self, SEL _cmd) {
     CGPoint m = ((CGPoint (*)(id, SEL))objc_msgSend)(NSClassFromString(@"NSEvent"), @selector(mouseLocation)); return UMPointFromScreen(self, _cmd, m); }
+/* Window size / visibility calls Unity makes while sizing its Metal view (5th device run: logged as unimplemented, the
+   struct ones came back as garbage through MSBase and Unity never drew a frame). Borderless full-screen windows:
+   frame == content rect. Backing scale = the screen's. */
+static CGFloat UMScale(void) { return ((CGFloat (*)(id, SEL))objc_msgSend)(((id (*)(id, SEL))objc_msgSend)(NSClassFromString(@"NSScreen"), @selector(mainScreen)), @selector(backingScaleFactor)); }
+static CGRect UMSameRectStyle(id self, SEL _cmd, CGRect r, NSUInteger style) { return r; }
+static CGRect UMSameRect(id self, SEL _cmd, CGRect r) { return r; }
+static CGRect UMToBacking(id self, SEL _cmd, CGRect r) { CGFloat s = UMScale(); return CGRectMake(r.origin.x * s, r.origin.y * s, r.size.width * s, r.size.height * s); }
+static CGRect UMFromBacking(id self, SEL _cmd, CGRect r) { CGFloat s = UMScale(); return CGRectMake(r.origin.x / s, r.origin.y / s, r.size.width / s, r.size.height / s); }
+static CGRect UMBackingAligned(id self, SEL _cmd, CGRect r, unsigned long long opts) { return CGRectIntegral(r); }
+static NSUInteger UMOcclusionVisible(id self, SEL _cmd) { return 1 << 1; }          /* NSWindowOcclusionStateVisible */
+static BOOL UMYes(id self, SEL _cmd) { return YES; }
+static BOOL UMMouseInRect(id self, SEL _cmd, CGPoint p, CGRect r) { return CGRectContainsPoint(r, p); }
 
 /* ---------------------------------------------------------------- CVDisplayLink
  * macOS calls the output callback on its own high-priority thread once per refresh. Here a CADisplayLink on a thread
@@ -339,6 +351,25 @@ __attribute__((constructor)) static void UMInit(void) {
             class_addMethod(W, @selector(convertPointToScreen:), (IMP)UMPointToScreen, "{CGPoint=dd}@:{CGPoint=dd}");
             class_addMethod(W, @selector(convertPointFromScreen:), (IMP)UMPointFromScreen, "{CGPoint=dd}@:{CGPoint=dd}");
             class_addMethod(W, @selector(mouseLocationOutsideOfEventStream), (IMP)UMMouseInWindow, "{CGPoint=dd}@:");
+            const char *R = "{CGRect={CGPoint=dd}{CGSize=dd}}";
+            char rr[96], rrs[96], rrq[96];
+            snprintf(rr, sizeof rr, "%s@:%s", R, R); snprintf(rrs, sizeof rrs, "%s@:%sQ", R, R); snprintf(rrq, sizeof rrq, "%s@:%sQ", R, R);
+            Class WM = object_getClass(W);                            /* class methods live on the metaclass */
+            class_addMethod(WM, @selector(frameRectForContentRect:styleMask:), (IMP)UMSameRectStyle, rrs);
+            class_addMethod(WM, @selector(contentRectForFrameRect:styleMask:), (IMP)UMSameRectStyle, rrs);
+            class_addMethod(W, @selector(frameRectForContentRect:), (IMP)UMSameRect, rr);
+            class_addMethod(W, @selector(convertRectToBacking:), (IMP)UMToBacking, rr);
+            class_addMethod(W, @selector(convertRectFromBacking:), (IMP)UMFromBacking, rr);
+            class_addMethod(W, @selector(backingAlignedRect:options:), (IMP)UMBackingAligned, rrq);
+            class_addMethod(W, @selector(occlusionState), (IMP)UMOcclusionVisible, "Q@:");
+            class_addMethod(W, @selector(isVisible), (IMP)UMYes, "B@:");
+            class_addMethod(W, @selector(isOnActiveSpace), (IMP)UMYes, "B@:");
+        }
+        Class V = NSClassFromString(@"NSView");
+        if (V) {
+            char pr[128]; snprintf(pr, sizeof pr, "B@:{CGPoint=dd}{CGRect={CGPoint=dd}{CGSize=dd}}");
+            class_addMethod(V, @selector(mouse:inRect:), (IMP)UMMouseInRect, pr);
+            class_addMethod(V, @selector(backingAlignedRect:options:), (IMP)UMBackingAligned, "{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}Q");
         }
     }
 }
