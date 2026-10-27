@@ -6,11 +6,18 @@ Run the user's own GOG **Mac** copy of Tunic natively on iPhone/iPad the way CyP
 - `tunic_enUS_1_0_t1483_b37_59078.pkg` — the user's GOG Mac installer (1.5 GB). Never commit or redistribute.
 - Repo root = this folder, GitHub `debeanz/tunic-ios-port` (public). Code copied from https://github.com/Thijs2004/CyPort (MIT, commit 65e2e57), not forked: retargeter (`tools/ios_retarget.py`), shim (`shim/`), launcher (`app/`), `build.sh`, `Build Tunic Port.command` (double-click launcher; `build.sh` behind it is still CyPort's and needs adapting). Keep CyPort's LICENSE line and credit. CyPort's original README is `docs/CYPORT_README.md`; its Cyberpunk-style icons were removed (Tunic's icon comes from the user's copy at build time).
 
+## What the GOG Mac build is (checked 2026-10-27)
+- Extracted to `extracted/` (gitignored). GOG puts the game in the pkg's `package.pkg/Scripts` cpio archive, not `Payload`; the app contents are `extracted/package.pkg-Scripts/payload/Contents/`. No 7-Zip on this PC: a stdlib Python xar/cpio extractor did it (`py -I pkg_extract.py <pkg> <out>`; Python is `py`, `python` is the Store stub).
+- **arm64: yes.** Universal x86_64 + arm64 (macOS min 11.0): executable `MacOS/Secret Legend`, `Frameworks/UnityPlayer.dylib`, `Frameworks/GameAssembly.dylib`, PlugIns `fmodstudio`, `InControlNative`, `resonanceaudio`, `steam_api`. **The CyPort route works.**
+- x86_64-only PlugIns: `fmod`, `fmodL`, `gvraudio`. Unused leftovers: GameAssembly loads only `fmodstudio` and `InControlNative` by name, and the Mac game already runs natively on Apple Silicon without them. Leave them out of the iOS app.
+- Unity **2020.3.17f1**, **IL2CPP** (`Data/il2cpp_data`), bundle id `com.AndrewShouldice.SecretLegend` (internal name "Secret Legend"), app version 1.0. Nearly all assets are in one LZ4 `UnityFS` file `Data/data.unity3d` (934 MB). Audio: FMOD Studio banks in `StreamingAssets` (music_main.bank 379 MB).
+- Frameworks to shim or redirect (UnityPlayer): Cocoa/AppKit, Carbon, IOKit, IOSurface, OpenGL (unused under Metal; stub it), Quartz, SecurityFoundation, CoreServices, MediaToolbox, plus the iOS-available ones (Foundation, QuartzCore, GameController, AudioUnit, CoreAudio, AVFoundation, CoreMedia, CoreVideo, CoreGraphics, CFNetwork, Security, SystemConfiguration). InControlNative adds ForceFeedback and Carbon. fmodstudio adds Carbon, AudioUnit and CoreAudio.
+
 ## Next steps
-1. Extract the `.pkg` (e.g. 7-Zip or xar + cpio/pbzx) into its own folder and find `Tunic.app`.
-2. Check `Contents/MacOS/*`, `UnityPlayer.dylib`, `GameAssembly.dylib` (or `Data/Managed/*.dll`) for an **arm64** slice. Intel-only means the CyPort route won't work; fall back to the unity-il2cpp/mono iOS port skills.
-3. Record the Unity version, texture compression (BC/DXT vs others), bundled plugins (FMOD, Galaxy) and the macOS frameworks the binaries import, to size the shim.
-4. Find out whether Unity's Mac player runs its loop on the main thread (decides whether the game loop must move off it).
+1. Texture formats inside `data.unity3d` (BC/DXT vs ASTC): decides whether a convert-on-import step is needed for devices without BC support.
+2. Whether Unity 2020.3's Mac player runs its loop on the main thread (decides whether the game loop must move off it so overlays stay smooth).
+3. Steam API: GameAssembly never loads `steam_api`; check UnityPlayer doesn't either, then leave it out.
+4. Adapt `build.sh` / `tools/ios_retarget.py` from Cyberpunk to these binaries, and start the Unity-specific shim.
 
 ## Rules the user set
 - **Settings:** keep all of CyPort's settings and behaviour unchanged (Resolution, Performance overlay Off/FPS/Detailed, Smooth frame pacing, Low-latency input, Look sensitivity, Cloud saves, Game data import/download, 🎮 pad toggle, restart "quit?" prompt). Only ADD the unity-ios-port mobile kit settings CyPort lacks, with the kit's labels and defaults (`~/.claude/plugins/cache/debeanz-ports/unity-ios-port/1.2.0/shared/mobile-kit/MobileSettings.cs`, `MobileDisplay.cs`):
