@@ -166,7 +166,7 @@ def retarget(src, dst, minos, sdk):
                 log.append("%s -> %s" % (old, new))
     if not seen: raise SystemExit("no LC_BUILD_VERSION: not a modern macOS build")
     log += reroute_imports(d, m)
-    if PROFILE == "tunic": log += reroute_lazy(d, m, REROUTE_TUNIC)
+    if PROFILE == "tunic": log += reroute_lazy(d, m, REROUTE_TUNIC) + hide_operator_new(d, m)
     if m["ftype"] == 2 and PROFILE == "cyberpunk": log += patch_pool_end(d, m) + patch_watchdog(d, m) + patch_pool_sizes(d, m) + patch_free_hook(d, m)      # MH_EXECUTE
     log += dedupe_dylibs(d, m)          # last: it moves load commands, so m["cmds"] offsets are stale afterwards
     open(dst, "wb").write(d)
@@ -198,6 +198,37 @@ def reroute_imports(d, m):
             else:        struct.pack_into("<I", d, p, (v & ~0xff) | ordinal)
             done.append(name)
     return ["rerouted to shim (ordinal %d): %s" % (ordinal, ", ".join(sorted(set(done))))] if done else []
+
+OPERATOR_NEW_DELETE = ("__Znwm", "__Znam", "__ZdlPv", "__ZdaPv")
+
+def hide_operator_new(d, m):
+    """UnityPlayer exports its own operator new/delete (Unity's memory manager). On macOS dyld coalesces every image -
+    the system libc++ included - onto them. Under LiveContainer the game is dlopen'ed: GameAssembly still binds to
+    Unity's operator new, but the iOS libc++ in the shared cache keeps the system delete, so a std::string grown inside
+    libc++ freed Unity memory with free(): "pointer being freed was not allocated" in il2cpp_init (3rd device run).
+    Renaming these exports in the export trie (first letter of each one's own edge: __Znwm -> __ZnWm, also hiding
+    its nothrow/sized variants below it) makes every image use the system operators. Same length, nothing moves."""
+    info = [off for cmd, off, sz in m["cmds"] if cmd in (0x22, 0x80000022)]
+    if not info: return []
+    eo, es = struct.unpack_from("<II", d, info[0] + 8 + 32)
+    if not es: return []
+    def uleb(i):
+        v = sh = 0
+        while True:
+            b = d[i]; i += 1; v |= (b & 0x7f) << sh; sh += 7
+            if not b & 0x80: return v, i
+    hidden = []
+    def walk(node, prefix):
+        p = eo + node; ts, p = uleb(p); p += ts; n = d[p]; p += 1
+        for _ in range(n):
+            j = d.index(b"\0", p); lab = bytes(d[p:j]).decode("latin1"); at = p; p = j + 1; child, p = uleb(p)
+            full = prefix + lab
+            hit = [t for t in OPERATOR_NEW_DELETE if full == t or (full.startswith(t) and not prefix.startswith(t))]
+            if hit and prefix in [t[:len(prefix)] for t in hit] and len(prefix) < len(hit[0]) <= len(full):
+                d[at] = ord(lab[0].upper()) if lab[0].islower() else ord("!"); hidden.append(hit[0]); continue
+            if any(t.startswith(full) for t in OPERATOR_NEW_DELETE): walk(child, full)
+    walk(0, "")
+    return ["operator new/delete exports hidden (system ones used everywhere): " + ", ".join(sorted(hidden))] if hidden else []
 
 def reroute_lazy(d, m, names):
     """dyld-info images: point the lazy-bind records of `names` at the shim. Every lazy record carries its own
