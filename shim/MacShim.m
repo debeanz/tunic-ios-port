@@ -639,8 +639,13 @@ static void MSLeftPress(int by, BOOL down) {
     MSOnMain(^{ l.contentsScale = UIScreen.mainScreen.nativeScale; l.frame = self.host.bounds; [self.host.layer addSublayer:l]; });
     /* start screen "Performance overlay: Detailed" or the "Metal HUD" switch turns on Apple's Metal HUD for the game's layer */
     BOOL hud = MSPref(@"MacShimOverlay", 1) == 2 || [NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"];
-    if ([l isKindOfClass:CAMetalLayer.class] && hud && [l respondsToSelector:NSSelectorFromString(@"setDeveloperHUDProperties:")])
-        [l setValue:@{ @"mode": @"default" } forKey:@"developerHUDProperties"];
+    if ([l isKindOfClass:CAMetalLayer.class] && hud) MSOnMain(^{
+        /* the documented iOS 16+ property (MTL_HUD_ENABLED is also set before the game starts, see the boot block) */
+        if ([l respondsToSelector:NSSelectorFromString(@"setDeveloperHUDProperties:")])
+            [l setValue:@{ @"mode": @"default", @"logging": @"default" } forKey:@"developerHUDProperties"];
+        MSLogf(@"Metal HUD requested on the game layer (layer reports %@)",
+               [l respondsToSelector:NSSelectorFromString(@"developerHUDProperties")] ? [l valueForKey:@"developerHUDProperties"] : @"no HUD property");
+    });
 }
 - (void)setHidden:(BOOL)h { _hidden = h; MSOnMain(^{ self.host.hidden = h; }); }
 - (void)msLayoutFromHost {
@@ -1976,6 +1981,10 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
             args[n++] = "-logFile"; args[n++] = strdup([docs stringByAppendingPathComponent:@"unity_player.log"].fileSystemRepresentation);
             args[n] = NULL; *_NSGetArgv() = args; *_NSGetArgc() = n;
             MSLogf(@"Unity log: %s", args[n - 1]);
+        }
+        /* start screen "Metal HUD" (or "Detailed"): Apple's switch, read when the game creates its Metal layer */
+        if ([NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"] || MSPref(@"MacShimOverlay", 1) == 2) {
+            setenv("MTL_HUD_ENABLED", "1", 1); MSLogf(@"Metal HUD on (MTL_HUD_ENABLED=1)");
         }
         /* iOS gives the main thread a 1 MB stack, macOS 8 MB, and the game runs its whole loop on the main thread.
            Run it on a big stack of its own (still the main thread) with a no-access guard below. */
