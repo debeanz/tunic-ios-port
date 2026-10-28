@@ -25,8 +25,12 @@ Run the user's own GOG **Mac** copy of Tunic natively on iPhone/iPad the way CyP
 - Audio: FMOD starts on RemoteIO without errors but was silent; session is now Playback (was SoloAmbient = silent switch) and FMOD's render callback logs format + level ("audio: FMOD output ... peak"). Not yet confirmed audible.
 - Key Unity-on-iOS fixes (don't undo): LiveContainer image lookup for main(); GC stack bottom (pthread_get_stackaddr_np); UnityPlayer operator new/delete exports hidden; keyboard layout CFData; window struct-returning selectors; makeBackingLayer; macOS Metal feature sets/families YES; MTLCopyAllDevices + CGDirectDisplayCopyCurrentMetalDevice; macOS-only Metal calls replaced in every class (iOS 27 implements them to abort); Cyberpunk fixed-address mouse gate off; NSLog -> macshim.log; Unity -logFile -> Documents/unity_player.log.
 
+- Audio confirmed working (Playback session). Metal HUD: no Metal device is made before Play any more (MSAddMacAPIs / UMPrepareMetal run in MSBootDelegate's go block after setenv MTL_HUD_ENABLED); not yet confirmed on device.
+- Built 2026-10-28, not yet device-tested: `shim/TunicControls.m` (kit controller layout + Phone Settings gear panel + Port* settings), new `shim/Launcher.swift` (Tunic title page + manual-page settings), aspect/scaling (MSRootVC viewDidLayoutSubviews + MSLayerFrame), frame cap (g_userCap / MacShimSetFrameCap), panel input blocking (g_inputBlocked, idle pad, msBecomeActive:NO), restyled loading screen.
+- Left out on purpose: kit "UI Size" (Tunic's UI scale is inside the game; no clean mapping yet) and CyPort "Cloud saves" (GameCloud syncs Cyberpunk's GOG saves).
+
 ## Next steps
-1. Confirm audio; then the Tunic launcher (must include a **Metal HUD** option, added to CyPort's launcher already as "TunicMetalHUD"), added settings, gear panel.
+1. Device-test the launcher, controls, gear panel and every setting (checklist); Metal HUD.
 2. Texture formats inside `data.unity3d` (BC/DXT vs ASTC): BC needs device support (A15+/M1 report it), else convert on import.
 3. Unity's Mac loop runs on the main thread (as Cyberpunk's): overlays must not hitch with it (framerate-independence rule).
 4. Tunic-themed launcher + the added settings + in-game gear panel.
