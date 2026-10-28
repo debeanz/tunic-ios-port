@@ -55,6 +55,9 @@ static NSString *MSQuarantineStats(void);
 static NSDictionary *MSConfig(void);
 static NSInteger MSPref(NSString *k, NSInteger def);
 static void MSStatusCreate(void);
+static void MSAddMacAPIs(void);
+/* Tunic: the one colour between the start screen and the game (launcher fade, boot screen, loading screen) */
+static UIColor *MSTunicNight(void) { return [UIColor colorWithRed:0.067 green:0.082 blue:0.090 alpha:1]; }
 static void MSTouchPadCreate(UIWindowScene *sc);
 static void MSTVRoute(void); static void MSTVObserve(void);
 static void MSLowLatencyWait(void); static void MSInputReport(void);
@@ -64,9 +67,12 @@ static BOOL MSMirrorFit(UIView *v, CGRect *r);
 @class NSWindow; static __weak NSWindow *g_gameWin;
 
 static void MSLogf(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
-/* Tunic / Unity additions (UnityShim.m) */
+/* Tunic / Unity additions (UnityShim.m, TunicControls.m) */
 NSString *MacShimMacAppRoot(void); NSString *MacShimDataFolder(void);
 const char *MacShimMapLibraryPath(const char *path, char *buf, size_t len);
+void UMPrepareMetal(void);
+UIView *TunicPadCreate(UIView *parent);
+CGRect TunicGameRect(CGRect bounds); BOOL TunicStretch(void); int TunicFrameCapSetting(void);
 static BOOL g_cursorHidden = NO, g_pointerLocked = NO;
 static CGPoint g_mouse;                                  /* Cocoa coords: origin bottom-left, points */
 static NSUInteger g_modFlags = 0;
@@ -396,7 +402,29 @@ static _Atomic int g_gcmCount;                   /* GameController mice connecte
 - (BOOL)prefersPointerLocked { return g_pointerLocked || g_gcmCount > 0; }   /* a locked pointer is what makes iOS send raw mouse motion */
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
+/* Tunic: Aspect Ratio (Phone Settings) - the game view at the chosen shape, centred; the game renders at that size */
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    for (UIView *v in self.view.subviews) if ([v isKindOfClass:MSHostView.class]) v.frame = TunicGameRect(self.view.bounds);
+}
 @end
+/* Screen Scaling = Stretch: the picture (the game's layer) fills the screen although the game renders at the chosen aspect */
+static CGRect MSLayerFrame(UIView *host) {
+    if (TunicStretch() && host.superview && [host.superview.nextResponder isKindOfClass:MSRootVC.class])
+        return [host convertRect:host.superview.bounds fromView:host.superview];
+    return host.bounds;
+}
+/* Phone Settings changed Aspect Ratio / Screen Scaling: lay the game windows out again (main thread) */
+void MacShimApplyDisplay(void) {
+    MSMainAsync(^{
+        for (id w in [(NSApplication *)NSApp windows]) {
+            UIWindow *uw = [w valueForKey:@"uiWindow"]; UIView *root = uw.rootViewController.view;
+            [root setNeedsLayout]; [root layoutIfNeeded];
+            for (UIView *v in root.subviews) if ([v isKindOfClass:MSHostView.class]) { [v setNeedsLayout]; [v layoutIfNeeded]; }
+        }
+        MSLogf(@"display: aspect %ld, %@", (long)[NSUserDefaults.standardUserDefaults integerForKey:@"PortAspect"], TunicStretch() ? @"stretch" : @"fit");
+    });
+}
 void MacShimLogC(const char *what, const char *detail) { MSLogf(@"%s: %s", what, detail); }   /* for MacShimC.c */
 void MacShimSetPointerLocked(int locked) {
     if ((locked != 0) != g_pointerLocked) { static int n; if (n++ < 20) MSLogf(@"pointer %@", locked ? @"locked (gameplay)" : @"unlocked"); }
@@ -636,7 +664,7 @@ static void MSLeftPress(int by, BOOL down) {
 - (void)setLayer:(CALayer *)l {
     _layer = l; if (!l) return;
     MSLogf(@"%@ setLayer: %@", NSStringFromClass(self.class), NSStringFromClass(l.class));
-    MSOnMain(^{ l.contentsScale = UIScreen.mainScreen.nativeScale; l.frame = self.host.bounds; [self.host.layer addSublayer:l]; });
+    MSOnMain(^{ l.contentsScale = UIScreen.mainScreen.nativeScale; l.frame = MSLayerFrame(self.host); [self.host.layer addSublayer:l]; });
     /* start screen "Performance overlay: Detailed" or the "Metal HUD" switch turns on Apple's Metal HUD for the game's layer */
     BOOL hud = MSPref(@"MacShimOverlay", 1) == 2 || [NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"];
     if ([l isKindOfClass:CAMetalLayer.class] && hud) MSOnMain(^{
@@ -650,7 +678,7 @@ static void MSLeftPress(int by, BOOL down) {
 - (void)setHidden:(BOOL)h { _hidden = h; MSOnMain(^{ self.host.hidden = h; }); }
 - (void)msLayoutFromHost {
     CGRect b = _host.bounds, ab = MSAKFromUI(b); BOOL changed = !CGSizeEqualToSize(ab.size, _frame.size);
-    if (_layer) { [CATransaction begin]; [CATransaction setDisableActions:YES]; _layer.frame = b; [CATransaction commit]; }
+    if (_layer) { [CATransaction begin]; [CATransaction setDisableActions:YES]; _layer.frame = MSLayerFrame(_host); [CATransaction commit]; }
     if (changed) {
         _frame.size = ab.size;
         if ([self respondsToSelector:@selector(viewDidChangeBackingProperties)]) ((void (*)(id, SEL))objc_msgSend)(self, @selector(viewDidChangeBackingProperties));
@@ -701,7 +729,7 @@ static void MSLeftPress(int by, BOOL down) {
 - (void)setContentView:(NSView *)v {
     _contentView = v; v.window = self; v.superview = nil;
     MSOnMain(^{
-        UIView *root = self->_uiWindow.rootViewController.view; v.host.frame = root.bounds; [root addSubview:v.host];
+        UIView *root = self->_uiWindow.rootViewController.view; v.host.frame = TunicGameRect(root.bounds); [root addSubview:v.host];
         v.host.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     });
     MSOnMain(^{ MSTVRoute(); });
@@ -1447,7 +1475,7 @@ static BOOL MSCalledFromGameMain(void *ret) {
 @interface MSBootVC : UIViewController @end
 @implementation MSBootVC
 - (void)viewDidLoad {
-    [super viewDidLoad]; self.view.backgroundColor = UIColor.blackColor;
+    [super viewDidLoad]; self.view.backgroundColor = MSTunicNight();      /* Tunic: same night colour as the launcher's fade and the loading screen */
     UILabel *l = [UILabel new]; l.text = @"Loading…"; l.textColor = [UIColor colorWithWhite:0.7 alpha:1]; l.font = [UIFont systemFontOfSize:17];
     UIActivityIndicatorView *sp = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     sp.color = UIColor.whiteColor; [sp startAnimating];
@@ -1536,6 +1564,7 @@ static BOOL MSTextSetOption(NSMutableString *txt, NSString *name, NSString *valu
  * heat), and each present asks Metal to keep the previous frame up for one beat (even frame times on the display). */
 static _Atomic double g_paceT;                      /* seconds per frame CyPort holds the game to, 0 = not pacing */
 static int g_paceMode = -1;                         /* 0 game, 1 auto, 30/40/60 fixed */
+static _Atomic int g_userCap;                       /* Tunic: Frame Rate setting (30/60/120), 0 = not set yet */
 static _Atomic int g_paceFPS;                       /* what g_paceT means, for the overlay/log */
 static int MSFrameRateChoice(void) {
     id c = MSConfig()[@"FrameRate"]; return [c respondsToSelector:@selector(intValue)] ? [c intValue] : 0;
@@ -1982,10 +2011,6 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
             args[n] = NULL; *_NSGetArgv() = args; *_NSGetArgc() = n;
             MSLogf(@"Unity log: %s", args[n - 1]);
         }
-        /* start screen "Metal HUD" (or "Detailed"): Apple's switch, read when the game creates its Metal layer */
-        if ([NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"] || MSPref(@"MacShimOverlay", 1) == 2) {
-            setenv("MTL_HUD_ENABLED", "1", 1); MSLogf(@"Metal HUD on (MTL_HUD_ENABLED=1)");
-        }
         /* iOS gives the main thread a 1 MB stack, macOS 8 MB, and the game runs its whole loop on the main thread.
            Run it on a big stack of its own (still the main thread) with a no-access guard below. */
         double mb = MSCfgD(@"MainStackMB", 64); int r;
@@ -2004,6 +2029,14 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
     };
     __weak UIWindow *win = self.window;
     void (^go)(void) = ^{
+        /* Tunic: nothing touches Metal before Play, so the start screen's "Metal HUD" switch is in place when the first
+           Metal device is made (MTL_HUD_ENABLED is read then; set at Play it came too late - the shim had made a device
+           at app launch). Then the shim's Metal setup, then the game's own. */
+        if ([NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"] || MSPref(@"MacShimOverlay", 1) == 2) {
+            setenv("MTL_HUD_ENABLED", "1", 1); MSLogf(@"Metal HUD on (MTL_HUD_ENABLED=1, before the first Metal device)");
+        }
+        MSAddMacAPIs(); UMPrepareMetal();
+        MacShimSetFrameCap(TunicFrameCapSetting());
         win.rootViewController = [MSBootVC new];
         MSStatusCreate();
         MSWatchGameSettings();
@@ -3170,11 +3203,20 @@ static BOOL MSSmoothOn(void) {
     id v = MSConfig()[@"SmoothPacing"];
     return [v respondsToSelector:@selector(boolValue)] ? [v boolValue] : MSPref(@"CyPortSmoothPacing", 1) != 0;
 }
+/* Tunic: Frame Rate (30 / 60 / 120 FPS) from the start screen or Phone Settings, live. With smooth pacing it caps the
+   steps above; without, it is a fixed limit through CyPort's limiter (120 = the screen's own rate, no limit). */
+void MacShimSetFrameCap(int fps) {
+    g_userCap = fps;
+    int maxHz = (int)lround(g_fps); if (maxHz < 60) maxHz = 60;
+    if (!MSSmoothOn()) MSPaceSet(fps > 0 && fps < maxHz ? fps : 0, @"Frame Rate setting");
+    MSLogf(@"frame rate setting: %d FPS%@", fps, MSSmoothOn() ? @" (smooth pacing stays at or below it)" : @"");
+}
 static void MSSmoothFrame(double tOut) {                 /* render thread, after every nextDrawable */
     static int on = -1; if (on < 0) on = MSSmoothOn(); if (!on || g_paceMode > 0 || g_inBackground) return;
     static double last, winStart, probeAt, backoff = 20; static int n, late, step, top, probing, probeFrom, probeWins, badWins;
     int maxHz = (int)lround(g_fps); if (maxHz < 60) maxHz = 60;
     double gd = g_gameMinDur; int cap = gd > 0 ? (int)lround(1 / gd) : maxHz; if (cap > maxHz) cap = maxHz;
+    int uc = g_userCap; if (uc > 0 && cap > uc) cap = uc;      /* Tunic: the Frame Rate setting is the ceiling */
     static const int steps[] = { 120, 60, 40, 30 };
     int newTop = 0; for (int i = 0; i < 4; i++) if (steps[i] <= cap && maxHz % steps[i] == 0) { newTop = steps[i]; break; }
     if (newTop != top) {                                  /* game cap changed (or first frame) */
@@ -3305,8 +3347,16 @@ static GCController *ms_current(id self, SEL _cmd) {
     GCController *c = ((GCController *(*)(id, SEL))g_origCurrent)(self, _cmd); return c ?: g_realPad ? nil : g_vpad;
 }
 static GCExtendedGamepad *g_pad;     /* our own handle, so the hooks below only see the game's calls */
+/* Tunic: while the Phone Settings panel (TunicControls.m) is open the game gets no controller input: a real pad's
+   callbacks are dropped and its gamepad reads come back idle (the panel reads the real one through the original IMPs). */
+static _Atomic BOOL g_inputBlocked;
+static GCExtendedGamepad *MSIdlePad(void) {
+    static GCController *c; static dispatch_once_t o; dispatch_once(&o, ^{ c = [GCController controllerWithExtendedGamepad]; });
+    return c.extendedGamepad;
+}
 static IMP g_origPhys;
 static id ms_physicalInputProfile(GCController *self, SEL _cmd) {
+    if (g_inputBlocked && self != g_vpad) return MSIdlePad();
     id r = ((id (*)(id, SEL))g_origPhys)(self, _cmd);
     static BOOL seen; if (self == g_vpad && !seen) { seen = YES; MSLogf(@"touch pad: the game is reading the virtual controller (physicalInputProfile, %@)", r == g_pad ? @"same object" : NSStringFromClass([r class])); }
     return r;
@@ -3333,6 +3383,7 @@ static NSString *ms_vendorName(GCController *self, SEL _cmd) {
 static IMP g_origExtGamepad;
 static id ms_extendedGamepad(GCController *self, SEL _cmd) {
     static BOOL seen; if (self == g_vpad && !seen) { seen = YES; MSLogf(@"touch pad: the game is reading the virtual controller (extendedGamepad)"); }
+    if (g_inputBlocked && self != g_vpad) return MSIdlePad();
     return ((id (*)(id, SEL))g_origExtGamepad)(self, _cmd);
 }
 /* The game reads gamepads through callbacks (setValueChangedHandler: on the gamepad / its elements), not by polling.
@@ -3395,14 +3446,16 @@ static void ms_setValueChangedHandler(id self, SEL _cmd, id handler) {
             h = ^(GCControllerAxisInput *a, float v) { @synchronized (g_padHandlers) { [g_padFired setObject:@(CACurrentMediaTime()) forKey:weakSelf]; } ((void (^)(id, float))real)(a, v); };
         else
             h = ^(id g, GCControllerElement *el) { @synchronized (g_padHandlers) { [g_padFired setObject:@(CACurrentMediaTime()) forKey:weakSelf]; } ((void (^)(id, id))real)(g, el); };
-    } else if (handler && MSCfgD(@"PadTiming", 0) != 0) {        /* a real controller: measure, change nothing (PadTiming = YES) */
-        id real = [handler copy];
+    } else if (handler) {        /* a real controller: dropped while the Phone Settings panel is open; PadTiming = YES measures */
+        id real = [handler copy]; BOOL timing = MSCfgD(@"PadTiming", 0) != 0;
         if ([self isKindOfClass:GCControllerButtonInput.class])
-            h = ^(GCControllerButtonInput *b, float v, BOOL p) { MSPadTiming(); ((void (^)(id, float, BOOL))real)(b, v, p); };
+            h = ^(GCControllerButtonInput *b, float v, BOOL p) { if (g_inputBlocked) return; if (timing) MSPadTiming(); ((void (^)(id, float, BOOL))real)(b, v, p); };
         else if ([self isKindOfClass:GCControllerDirectionPad.class])
-            h = ^(GCControllerDirectionPad *d, float x, float y) { MSPadTiming(); ((void (^)(id, float, float))real)(d, x, y); };
+            h = ^(GCControllerDirectionPad *d, float x, float y) { if (g_inputBlocked) return; if (timing) MSPadTiming(); ((void (^)(id, float, float))real)(d, x, y); };
         else if ([self isKindOfClass:GCControllerAxisInput.class])
-            h = ^(GCControllerAxisInput *a, float v) { MSPadTiming(); ((void (^)(id, float))real)(a, v); };
+            h = ^(GCControllerAxisInput *a, float v) { if (g_inputBlocked) return; if (timing) MSPadTiming(); ((void (^)(id, float))real)(a, v); };
+        else
+            h = ^(id g, GCControllerElement *el) { if (g_inputBlocked) return; ((void (^)(id, id))real)(g, el); };
     }
     if (orig) ((void (*)(id, SEL, id))orig)(self, _cmd, h);
 }
@@ -3473,6 +3526,51 @@ static BOOL MSRealControllerConnected(void) {
     for (GCController *c in all) if (!c.isSnapshot) return YES;
     return NO;
 }
+/* ---------------------------------------------------------------- for TunicControls.m (the kit's on-screen controller and
+ * its Phone Settings panel): presses go into the virtual controller the game reads. Button ids: 0 A, 1 B, 2 X, 3 Y,
+ * 4 LB, 5 RB, 6 LT, 7 RT, 8 L3, 9 R3, 10 View, 11 Menu. */
+void MacShimPadButton(int b, BOOL down) {
+    GCExtendedGamepad *g = g_pad; if (!g || g_inputBlocked) return;
+    GCControllerButtonInput *x = nil;
+    switch (b) {
+        case 0: x = g.buttonA; break;          case 1: x = g.buttonB; break;          case 2: x = g.buttonX; break;
+        case 3: x = g.buttonY; break;          case 4: x = g.leftShoulder; break;     case 5: x = g.rightShoulder; break;
+        case 6: x = g.leftTrigger; break;      case 7: x = g.rightTrigger; break;     case 8: x = g.leftThumbstickButton; break;
+        case 9: x = g.rightThumbstickButton; break; case 10: x = g.buttonOptions; break; case 11: x = g.buttonMenu; break;
+    }
+    MSPadSetButton(x, down ? 1 : 0);
+}
+void MacShimPadDpad(int x, int y) { if (g_pad && !g_inputBlocked) MSPadSetStick(g_pad.dpad, x, y); }
+void MacShimPadStick(int right, float x, float y) {
+    if (!g_pad || g_inputBlocked) return;
+    MSPadSetStick(right ? g_pad.rightThumbstick : g_pad.leftThumbstick, x, y);
+}
+/* the on-screen controller is wanted: the game draws, no real controller or mouse */
+BOOL MacShimPadWanted(void) { return g_frames > 60 && !(g_vpad ? g_realPad : MSRealControllerConnected()) && !g_gcmCount; }
+BOOL MacShimGameDrawing(void) { return g_frames > 60; }
+/* a real controller's gamepad, read past the hooks (the panel navigates with it while the game is blocked) */
+GCExtendedGamepad *MacShimRealGamepad(void) {
+    NSArray *all = g_origControllers ? ((NSArray *(*)(id, SEL))g_origControllers)(GCController.class, @selector(controllers)) : GCController.controllers;
+    for (GCController *c in all) {
+        if (c == g_vpad || c.isSnapshot) continue;
+        GCExtendedGamepad *e = g_origExtGamepad ? ((id (*)(id, SEL))g_origExtGamepad)(c, @selector(extendedGamepad)) : c.extendedGamepad;
+        if (e) return e;
+    }
+    return nil;
+}
+/* Phone Settings panel open/closed: no controller input for the game, and the game is told the app is inactive (Unity
+   pauses its player loop, as when a Mac window loses focus) */
+void MacShimBlockGameInput(BOOL blocked) {
+    if (g_inputBlocked == blocked) return;
+    if (blocked && g_pad) {                         /* let go of everything the on-screen pad holds */
+        for (GCControllerElement *el in g_pad.allElements) if ([el isKindOfClass:GCControllerButtonInput.class]) MSPadSetButton((GCControllerButtonInput *)el, 0);
+        MSPadSetStick(g_pad.leftThumbstick, 0, 0); MSPadSetStick(g_pad.rightThumbstick, 0, 0); MSPadSetStick(g_pad.dpad, 0, 0);
+    }
+    g_inputBlocked = blocked;
+    MSLogf(@"Phone Settings %@: game input %@", blocked ? @"open" : @"closed", blocked ? @"blocked, game paused" : @"back");
+    MSMainAsync(^{ [(NSApplication *)NSApp msBecomeActive:!blocked]; });
+}
+
 typedef enum { MSCtlButton, MSCtlToggle } MSCtlKind;
 @interface MSCtl : NSObject
 @property MSCtlKind kind; @property CGPoint center; @property CGFloat r; @property(copy) NSString *label;
@@ -3783,8 +3881,9 @@ static void MSTouchPadCreate(UIWindowScene *sc) {                 /* main thread
     g_padWin = sc ? [[MSPadWindow alloc] initWithWindowScene:sc] : [[MSPadWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     g_padWin.windowLevel = UIWindowLevelNormal + 1; g_padWin.backgroundColor = UIColor.clearColor;
     g_padWin.rootViewController = [MSPadVC new]; g_padWin.rootViewController.view.backgroundColor = UIColor.clearColor;
-    MSPadView *pv = [[MSPadView alloc] initWithFrame:g_padWin.rootViewController.view.bounds];
-    [g_padWin.rootViewController.view addSubview:pv]; g_padWin.hidden = NO;
+    /* Tunic: the mobile kit's on-screen controller + Phone Settings gear panel (TunicControls.m) instead of MSPadView */
+    UIView *pv = TunicPadCreate(g_padWin.rootViewController.view);
+    (void)MSPadView.class; [pv setNeedsLayout]; g_padWin.hidden = NO;
     /* tell the game a controller arrived once it's running (it also finds it in +controllers); a real controller takes
        over from the virtual one: the game sees the virtual pad disconnect, and connect again when the real one leaves */
     if (g_vpad) {
@@ -4041,12 +4140,19 @@ static void MSStatusCreate(void) {                    /* main thread, before the
     CALayer *root = g_statusWin.rootViewController.view.layer; g_stRoot = root;
     UIEdgeInsets si = (sc.windows.firstObject ?: UIApplication.sharedApplication.windows.firstObject).safeAreaInsets;
     g_stPad = MAX(24, MAX(MAX(si.left, si.right), MAX(si.top, si.bottom)) + 12);
-    g_stBg = [CALayer layer]; g_stBg.backgroundColor = [UIColor colorWithWhite:0.04 alpha:1].CGColor; [root addSublayer:g_stBg];
-    g_stTitle = MSTextLayer(20, NO, UIColor.whiteColor); g_stTitle.string = @"Loading Cyberpunk 2077…"; [g_stBg addSublayer:g_stTitle];
-    g_stTrack = [CALayer layer]; g_stTrack.backgroundColor = [UIColor colorWithWhite:1 alpha:0.15].CGColor; g_stTrack.cornerRadius = 4; [g_stBg addSublayer:g_stTrack];
-    g_stFill = [CALayer layer]; g_stFill.backgroundColor = [UIColor colorWithRed:0.98 green:0.93 blue:0.0 alpha:1].CGColor; g_stFill.cornerRadius = 4; g_stFill.anchorPoint = CGPointZero; [g_stTrack addSublayer:g_stFill];
-    g_stHead = MSTextLayer(13, YES, [UIColor colorWithWhite:1 alpha:0.9]); [g_stBg addSublayer:g_stHead];
+    /* Tunic: the start screen fades into this night colour, the game fades in over it - no flash in between. Just the
+       title, breathing slowly (Core Animation: smooth however busy the loading game is); details stay in macshim.log. */
+    g_stBg = [CALayer layer]; g_stBg.backgroundColor = MSTunicNight().CGColor; [root addSublayer:g_stBg];
+    g_stTitle = MSTextLayer(17, NO, [UIColor colorWithRed:0.95 green:0.91 blue:0.83 alpha:1]); g_stTitle.string = @"Loading Tunic";
+    g_stTitle.alignmentMode = kCAAlignmentCenter; [g_stBg addSublayer:g_stTitle];
+    { CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"]; a.fromValue = @0.35; a.toValue = @1; a.duration = 1.4;
+      a.autoreverses = YES; a.repeatCount = HUGE_VALF; a.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+      [g_stTitle addAnimation:a forKey:@"breathe"]; }
+    g_stTrack = [CALayer layer]; g_stTrack.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor; g_stTrack.cornerRadius = 2; [g_stBg addSublayer:g_stTrack];
+    g_stFill = [CALayer layer]; g_stFill.backgroundColor = [UIColor colorWithRed:0.93 green:0.62 blue:0.32 alpha:1].CGColor; g_stFill.cornerRadius = 2; g_stFill.anchorPoint = CGPointZero; [g_stTrack addSublayer:g_stFill];
+    g_stHead = MSTextLayer(12, YES, [UIColor colorWithWhite:1 alpha:0.85]); [g_stBg addSublayer:g_stHead];
     g_stLog = MSTextLayer(10, YES, [UIColor colorWithWhite:1 alpha:0.6]); g_stLog.wrapped = YES; g_stLog.truncationMode = kCATruncationNone; [g_stBg addSublayer:g_stLog];
+    g_stLog.hidden = YES;
     g_statusWin.hidden = NO;
     MSTouchPadCreate(sc);
     MSStartReadProgress();
@@ -4196,10 +4302,7 @@ static void MSStartReadProgress(void) {
             os_unfair_lock_lock(&g_tailLock);
             for (int i = MAX(0, g_logTailN - MS_TAIL); i < g_logTailN; i++) [lines addObject:g_logTail[i % MS_TAIL]];
             os_unfair_lock_unlock(&g_tailLock);
-            const char *spin[] = { "◐", "◓", "◑", "◒" };
-            BOOL busy = cpuPct > 15 || idle < 3;
-            NSString *title = [NSString stringWithFormat:@"%s  Loading Cyberpunk 2077…  %.0f%%%@", busy ? spin[tick % 4] : "•", frac * 100,
-                               [NSUserDefaults.standardUserDefaults objectForKey:@"MacShimLoadBytes"] ? @"" : @" (estimate)"];
+            NSString *title = @"Loading Tunic"; (void)frac;     /* Tunic: no byte-based estimate (the game's reads aren't counted) */
             [CATransaction begin]; [CATransaction setDisableActions:YES];
             CGRect R = g_stRoot.bounds; CGFloat pad = g_stPad;           /* no UIKit off the main thread: insets were read at start */
             CGFloat x = pad, w = R.size.width - 2 * pad; UIEdgeInsets in = UIEdgeInsetsMake(pad - 12, pad, pad - 12, pad);
@@ -4207,15 +4310,14 @@ static void MSStartReadProgress(void) {
                 g_stBg.frame = CGRectMake(0, R.size.height - 30, R.size.width, 30); g_stBg.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5].CGColor;
                 g_stTitle.hidden = g_stLog.hidden = YES;
                 g_stHead.frame = CGRectMake(x, 2, w, 16); g_stTrack.frame = CGRectMake(x, 21, w, 4);
-            } else {
-                g_stBg.frame = R;
-                CGFloat y = MAX(28, in.top + 12);
-                g_stTitle.frame = CGRectMake(x, y, w, 26); g_stTrack.frame = CGRectMake(x, y + 36, w, 8);
-                g_stHead.frame = CGRectMake(x, y + 54, w, 18);
-                g_stLog.frame = CGRectMake(x, y + 84, w, R.size.height - y - 84 - MAX(16, in.bottom));
-                g_stTitle.string = title; g_stLog.string = [lines componentsJoinedByString:@"\n"];
+            } else {                                                    /* Tunic: just the title, centred */
+                g_stBg.frame = R; (void)in; (void)lines;
+                g_stTitle.frame = CGRectMake(x, R.size.height / 2 - 12, w, 24);
+                g_stTrack.hidden = g_stHead.hidden = YES;
+                g_stTitle.string = title;
             }
-            g_stFill.frame = CGRectMake(0, 0, g_stTrack.bounds.size.width * frac, g_stTrack.bounds.size.height);
+            if (compact) { g_stTrack.hidden = NO; g_stHead.hidden = NO; g_stTitle.hidden = YES; [g_stTitle removeAnimationForKey:@"breathe"]; }
+            g_stFill.frame = CGRectMake(0, 0, g_stTrack.bounds.size.width * (compact ? 1 : 0), g_stTrack.bounds.size.height);
             g_stHead.string = head;
             [CATransaction commit]; [CATransaction flush];
         }
@@ -4637,7 +4739,7 @@ __attribute__((constructor)) static void MSInit(void) {
             chdir(app.fileSystemRepresentation);
             MSLogf(@"game folder (%@): %@ -> %@", [root hasPrefix:NSBundle.mainBundle.bundlePath] ? @"in the app" : g_external ? @"external" : @"internal", root, app);
         } else MSLogf(@"no game folder yet - setup screen will appear when the game starts");
-        MSAddMacAPIs();
+        /* MSAddMacAPIs() runs at Play (MSBootDelegate): it makes a Metal device, which must come after the HUD switch */
         MSHookGameWindow();
         /* Unity subclasses NSApplication (PlayerApplication): NSApp must be one, or its overrides never run */
         [(NSClassFromString(@"PlayerApplication") ?: [NSApplication class]) sharedApplication];

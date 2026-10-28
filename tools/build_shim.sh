@@ -28,7 +28,7 @@ clang -target $TARGET -isysroot "$SDK" -dynamiclib -fobjc-arc -O2 \
   -framework AVFoundation -framework AudioToolbox -framework CoreVideo -lz -liconv \
   -Wl,-reexport_framework,Foundation -Wl,-reexport_framework,CoreGraphics -Wl,-reexport_framework,Security -Wl,-reexport_framework,Metal \
   -Wl,-reexport_framework,CoreVideo -Wl,-reexport_framework,AVFoundation -Wl,-reexport_framework,AudioToolbox -Wl,-reexport-liconv \
-  "$HERE/shim/MacShim.m" "$HERE/shim/MacShimC.c" "$HERE/shim/UnityShim.m" "$HERE/shim/UnityShimC.c" \
+  "$HERE/shim/MacShim.m" "$HERE/shim/MacShimC.c" "$HERE/shim/UnityShim.m" "$HERE/shim/UnityShimC.c" "$HERE/shim/TunicControls.m" \
   "$HERE/shim/StoreCodecs.c" "$HERE/shim/third_party/lzma/LzmaDec.c" "$OUT/Launcher.o" \
   -o "$OUT/libMacShim.dylib"
 rm -f "$OUT/Launcher.o"

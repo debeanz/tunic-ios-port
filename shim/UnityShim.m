@@ -374,6 +374,9 @@ static void UMMetalAsMac(void) {
     UMReplaceMacOnlyMetal();
 }
 
+/* at Play, after the Metal HUD switch (MacShim.m MSBootDelegate): no Metal device exists before this */
+void UMPrepareMetal(void) { static dispatch_once_t o; dispatch_once(&o, ^{ UMMetalAsMac(); }); }
+
 /* ---------------------------------------------------------------- audio session (UnityShimC.c "audio") */
 static void UMAudioUp(void) {
     static dispatch_once_t o;
@@ -438,7 +441,7 @@ static NSString *um_executablePath(NSBundle *self, SEL _cmd) {
 __attribute__((constructor)) static void UMInit(void) {
     @autoreleasepool {
         _dyld_register_func_for_add_image(UMImageAdded);          /* also called for every image already loaded */
-        UMMetalAsMac();
+        /* UMMetalAsMac() runs at Play (UMPrepareMetal): it makes a Metal device, which must come after the HUD switch */
         Class B = NSBundle.class;
         o_bundlePath = method_setImplementation(class_getInstanceMethod(B, @selector(bundlePath)), (IMP)um_bundlePath);
         o_executablePath = method_setImplementation(class_getInstanceMethod(B, @selector(executablePath)), (IMP)um_executablePath);
