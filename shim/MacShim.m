@@ -73,7 +73,7 @@ NSString *MacShimMacAppRoot(void); NSString *MacShimDataFolder(void);
 const char *MacShimMapLibraryPath(const char *path, char *buf, size_t len);
 void UMPrepareMetal(void);
 UIView *TunicPadCreate(UIView *parent);
-CGRect TunicGameRect(CGRect bounds); BOOL TunicStretch(void); int TunicFrameCapSetting(void); double TunicAspectValue(void);
+CGRect TunicGameRect(CGRect bounds); CGRect TunicStretchRect(CGRect bounds); BOOL TunicStretch(void); int TunicFrameCapSetting(void); double TunicAspectValue(void);
 void MacShimSetFrameCap(int fps);
 static BOOL g_cursorHidden = NO, g_pointerLocked = NO;
 static CGPoint g_mouse;                                  /* Cocoa coords: origin bottom-left, points */
@@ -119,7 +119,8 @@ static void MSRefreshScreen(void) {
         if (g_tvAspect > 0) g_sw = round(g_sh * g_tvAspect);
         /* Tunic: Aspect Ratio (start screen / Phone Settings). Unity renders a full-screen window at the screen's size,
            so the shape has to be the screen's: narrower than the phone = keep the height, wider = keep the width.
-           The game view is framed to the same shape (TunicGameRect); Stretch then fills the screen with it. */
+           The game view is framed to the same shape (TunicGameRect); the stretch modes give 16:9 (Tunic's widest) and stretch
+           its layer over the screen or a 1.943:1 frame (MSLayerFrame). */
         double ta = TunicAspectValue();
         if (ta > 0 && g_tvAspect <= 0) {
             double sw = MAX(bs.width, bs.height), sh = MIN(bs.width, bs.height);
@@ -424,10 +425,11 @@ static _Atomic int g_gcmCount;                   /* GameController mice connecte
     for (UIView *v in self.view.subviews) if ([v isKindOfClass:MSHostView.class]) v.frame = TunicGameRect(self.view.bounds);
 }
 @end
-/* Screen Scaling = Stretch: the picture (the game's layer) fills the screen although the game renders at the chosen aspect */
+/* Screen Scaling = Stretch / Stretch 1.943:1: the picture (the game's layer) fills the screen or the centred 1.943:1 frame
+   although the game renders at its own shape (TunicGameRect, the host view) */
 static CGRect MSLayerFrame(UIView *host) {
     if (TunicStretch() && host.superview && [host.superview.nextResponder isKindOfClass:MSRootVC.class])
-        return [host convertRect:host.superview.bounds fromView:host.superview];
+        return [host convertRect:TunicStretchRect(host.superview.bounds) fromView:host.superview];
     return host.bounds;
 }
 /* Phone Settings changed Aspect Ratio / Screen Scaling: lay the game windows out again (main thread) */
@@ -441,7 +443,8 @@ void MacShimApplyDisplay(void) {
             [root setNeedsLayout]; [root layoutIfNeeded];
             for (UIView *v in root.subviews) if ([v isKindOfClass:MSHostView.class]) { [v setNeedsLayout]; [v layoutIfNeeded]; }
         }
-        MSLogf(@"display: aspect %ld, %@", (long)[NSUserDefaults.standardUserDefaults integerForKey:@"PortAspect"], TunicStretch() ? @"stretch" : @"fit");
+        MSLogf(@"display: aspect %ld, scaling %ld, game screen %.0fx%.0f", (long)[NSUserDefaults.standardUserDefaults integerForKey:@"PortAspect"],
+               (long)[NSUserDefaults.standardUserDefaults integerForKey:@"PortScaling"], g_sw, g_sh);
     });
 }
 void MacShimLogC(const char *what, const char *detail) { MSLogf(@"%s: %s", what, detail); }   /* for MacShimC.c */

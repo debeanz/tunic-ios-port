@@ -155,18 +155,25 @@ private struct LauncherView: View {
     }
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0" }
     private func tick() { UISelectionFeedbackGenerator().selectionChanged() }
-    /// render size of mode i for the current Aspect Ratio, worked out the way the shim does it (MSRefreshScreen /
-    /// MSModeName): the landscape screen in points, shaped by the aspect, times the mode's scale. Follows the picker live.
+    /// render size of mode i for the current Aspect Ratio and Screen scaling, worked out the way the shim does it
+    /// (TunicAspectValue / MSRefreshScreen / MSModeName): the landscape screen in points, shaped, times the mode's scale.
     private func modeLabel(_ i: Int) -> String {
         let b = UIScreen.main.bounds.size
         var w = Double(max(b.width, b.height)), h = Double(min(b.width, b.height))
         let shapes = [0, 2106.0 / 1084.0, 16.0 / 9.0, 4.0 / 3.0]
-        if aspect > 0 && aspect < shapes.count {
-            let t = shapes[aspect]
-            if h * t <= w { w = (h * t).rounded() } else { h = (w / t).rounded() }
-        }
+        var t = aspect > 0 && aspect < shapes.count ? shapes[aspect] : 0
+        if scaling == 1 || scaling == 2, t == 0 || t > 16.0 / 9.0 { t = 16.0 / 9.0 }   // stretch: Tunic's 16:9 (TunicAspectValue)
+        if t > 0 { if h * t <= w { w = (h * t).rounded() } else { h = (w / t).rounded() } }
         let k = MacShimModeScale(Int32(i))
         return "\(Int(w * k + 0.5)) × \(Int(h * k + 0.5))"
+    }
+    private var scalingNote: String {
+        let src = aspect == 3 ? "The 4:3" : "Tunic's 16:9"
+        switch scaling {
+        case 1: return "\(src) picture stretched over the whole screen."
+        case 2: return "\(src) picture stretched to 1.943:1, black bars beside the Dynamic Island."
+        default: return "The picture keeps its shape; black bars fill the rest."
+        }
     }
 
     var body: some View {
@@ -280,9 +287,12 @@ private struct LauncherView: View {
                             }
                         }
                     }
-                    row("Screen scaling", note: aspect == 0 ? "Used when the aspect ratio isn't iPhone Default." : nil) {
-                        Picker("Screen scaling", selection: $scaling) { Text("Fit").tag(0); Text("Stretch").tag(1) }
-                            .pickerStyle(.segmented).frame(width: 170).disabled(aspect == 0)
+                    row("Screen scaling", note: scalingNote) {
+                        chipMenu(["Fit", "Stretch", "Stretch 1.943:1"][max(0, min(2, scaling))]) {
+                            Picker("Screen scaling", selection: $scaling) {
+                                Text("Fit").tag(0); Text("Stretch").tag(1); Text("Stretch 1.943:1").tag(2)
+                            }
+                        }
                     }
                     row("Frame rate", note: frameRate == 2 ? "120 needs a ProMotion screen." : nil) {
                         Picker("Frame rate", selection: $frameRate) { Text("30").tag(0); Text("60").tag(1); Text("120").tag(2) }
