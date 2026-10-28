@@ -169,7 +169,10 @@ def retarget(src, dst, minos, sdk):
                 log.append("%s -> %s" % (old, new))
     if not seen: raise SystemExit("no LC_BUILD_VERSION: not a modern macOS build")
     log += reroute_imports(d, m)
-    if PROFILE == "tunic": log += reroute_lazy(d, m, REROUTE_TUNIC) + hide_operator_new(d, m) + patch_camera_resizer(d, m)
+    if PROFILE == "tunic": log += reroute_lazy(d, m, REROUTE_TUNIC) + hide_operator_new(d, m)
+    # patch_camera_resizer is off: the one device build with it (2026-10-28) froze twice (game loop stopped, CPU 3%)
+    # and dropped from 60 to 30 FPS; without it Tunic keeps its own 16:9 picture
+    if PROFILE == "tunic" and os.environ.get("TUNIC_WIDE_CAMERA") == "1": log += patch_camera_resizer(d, m)
     if m["ftype"] == 2 and PROFILE == "cyberpunk": log += patch_pool_end(d, m) + patch_watchdog(d, m) + patch_pool_sizes(d, m) + patch_free_hook(d, m)      # MH_EXECUTE
     log += dedupe_dylibs(d, m)          # last: it moves load commands, so m["cmds"] offsets are stale afterwards
     open(dst, "wb").write(d)
