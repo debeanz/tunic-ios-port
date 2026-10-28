@@ -169,7 +169,7 @@ def retarget(src, dst, minos, sdk):
                 log.append("%s -> %s" % (old, new))
     if not seen: raise SystemExit("no LC_BUILD_VERSION: not a modern macOS build")
     log += reroute_imports(d, m)
-    if PROFILE == "tunic": log += reroute_lazy(d, m, REROUTE_TUNIC) + hide_operator_new(d, m)
+    if PROFILE == "tunic": log += reroute_lazy(d, m, REROUTE_TUNIC) + hide_operator_new(d, m) + patch_camera_resizer(d, m)
     if m["ftype"] == 2 and PROFILE == "cyberpunk": log += patch_pool_end(d, m) + patch_watchdog(d, m) + patch_pool_sizes(d, m) + patch_free_hook(d, m)      # MH_EXECUTE
     log += dedupe_dylibs(d, m)          # last: it moves load commands, so m["cmds"] offsets are stale afterwards
     open(dst, "wb").write(d)
@@ -203,6 +203,32 @@ def reroute_imports(d, m):
     return ["rerouted to shim (ordinal %d): %s" % (ordinal, ", ".join(sorted(set(done))))] if done else []
 
 OPERATOR_NEW_DELETE = ("__Znwm", "__Znam", "__ZdlPv", "__ZdaPv")
+
+def patch_camera_resizer(d, m):
+    """Tunic's CameraResizer.Update (Assembly-CSharp, GOG Mac 1.0 GameAssembly) keeps the 3D picture between 1.6:1 and
+    16:9 with a camera viewport: wider screens get black side bars inside the game's own image. On an iPhone (2.17:1)
+    that is pillarboxed 16:9 whatever the launcher's Aspect Ratio says. Its limits are float constants built with
+    mov/movk: the movk halves are changed so min = 0x3c00cccd (~0.008) and max = 0x41208e39 (~10). The viewport then
+    always fills the view, and the shim's Aspect Ratio / Scaling setting alone shapes the picture.
+    Each word is checked first; any other GameAssembly is left alone."""
+    patches = (  # vmaddr, old word, new word
+        (0x57f100, 0x72A7F988, 0x72A78008),   # movk w8, #0x3fcc, lsl 16 -> #0x3c00  (min aspect, the test)
+        (0x57f114, 0x72A7F988, 0x72A78008),   #                                      (min aspect, the call)
+        (0x57f130, 0x72A7FC68, 0x72A82408),   # movk w8, #0x3fe3, lsl 16 -> #0x4120  (max aspect, the test)
+        (0x57f144, 0x72A7FC68, 0x72A82408),   #                                      (max aspect, the call)
+    )
+    text = None
+    for cmd, off, sz in m["cmds"]:
+        if cmd == 0x19 and bytes(d[off + 8: off + 24]).rstrip(b"\0") == b"__TEXT":
+            text = struct.unpack_from("<4Q", d, off + 24)
+    if not text: return []
+    va, vs, fo, fs = text
+    offs = [fo + a - va for a, _, _ in patches]
+    if any(not (va <= a < va + fs) for a, _, _ in patches) or \
+       any(struct.unpack_from("<I", d, o)[0] != old for o, (_, old, _) in zip(offs, patches)):
+        return []
+    for o, (_, _, new) in zip(offs, patches): struct.pack_into("<I", d, o, new)
+    return ["CameraResizer: 3D viewport no longer pillar/letterboxed to 1.6..16:9 (4 constants)"]
 
 def hide_operator_new(d, m):
     """UnityPlayer exports its own operator new/delete (Unity's memory manager). On macOS dyld coalesces every image -

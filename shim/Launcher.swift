@@ -110,6 +110,8 @@ private struct Grain: View {
     }
 }
 
+@_silgen_name("MacShimModeScale") private func MacShimModeScale(_ i: Int32) -> Double
+
 /// Whether a Metal device already exists in this process: making one loads the GPU driver (AGXMetal...).
 /// Once it is there, a Metal HUD change only applies after Tunic restarts.
 private func metalDeviceMade() -> Bool {
@@ -153,6 +155,19 @@ private struct LauncherView: View {
     }
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0" }
     private func tick() { UISelectionFeedbackGenerator().selectionChanged() }
+    /// render size of mode i for the current Aspect Ratio, worked out the way the shim does it (MSRefreshScreen /
+    /// MSModeName): the landscape screen in points, shaped by the aspect, times the mode's scale. Follows the picker live.
+    private func modeLabel(_ i: Int) -> String {
+        let b = UIScreen.main.bounds.size
+        var w = Double(max(b.width, b.height)), h = Double(min(b.width, b.height))
+        let shapes = [0, 2106.0 / 1084.0, 16.0 / 9.0, 4.0 / 3.0]
+        if aspect > 0 && aspect < shapes.count {
+            let t = shapes[aspect]
+            if h * t <= w { w = (h * t).rounded() } else { h = (w / t).rounded() }
+        }
+        let k = MacShimModeScale(Int32(i))
+        return "\(Int(w * k + 0.5)) × \(Int(h * k + 0.5))"
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -248,10 +263,12 @@ private struct LauncherView: View {
             VStack(alignment: .leading, spacing: 24) {
                 section(1, "Display") {
                     row("Resolution", note: model.notes[model.resolution].isEmpty ? nil : model.notes[model.resolution].capitalizedFirst) {
-                        chipMenu(model.resolutions[model.resolution]) {
-                            Picker("Resolution", selection: $model.resolution) {
-                                ForEach(Array(model.resolutions.enumerated()).reversed(), id: \.offset) { i, r in
-                                    Text(model.notes[i].isEmpty ? r : "\(r)  ·  \(model.notes[i])").tag(i)
+                        chipMenu(modeLabel(model.resolution)) {
+                            // toggles: a checkmark plus title and subtitle lines, so a note never wraps the size
+                            ForEach(Array(model.resolutions.indices).reversed(), id: \.self) { i in
+                                Toggle(isOn: Binding(get: { model.resolution == i }, set: { _ in model.resolution = i })) {
+                                    Text(modeLabel(i))
+                                    if !model.notes[i].isEmpty { Text(model.notes[i].capitalizedFirst) }
                                 }
                             }
                         }

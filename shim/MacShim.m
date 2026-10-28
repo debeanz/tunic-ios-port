@@ -106,7 +106,10 @@ static double g_tvAspect;                    /* > 0: a TV was connected at launc
 static UIScreen *MSExternalScreen(void) { for (UIScreen *s in UIScreen.screens) if (s != UIScreen.mainScreen) return s; return nil; }
 static void MSRefreshScreen(void) {
     MSOnMain(^{
-        UIScreen *s = UIScreen.mainScreen; g_sw = s.bounds.size.width; g_sh = s.bounds.size.height; g_ss = s.nativeScale; g_fps = (double)s.maximumFramesPerSecond;
+        /* Tunic is landscape only; at launch the scene can still be portrait (the start screen's resolution list was
+           made then and showed portrait sizes, 323x166 for 627x322) - so the long side is always the width */
+        UIScreen *s = UIScreen.mainScreen; CGSize bs = s.bounds.size;
+        g_sw = MAX(bs.width, bs.height); g_sh = MIN(bs.width, bs.height); g_ss = s.nativeScale; g_fps = (double)s.maximumFramesPerSecond;
         /* decided once, so the size the game was told never changes under it: same height (= same pixel cost) as
            the phone, the TV's width:height. TVOut = NO / TVShape = NO in macshim.plist turn it off. */
         static dispatch_once_t o; dispatch_once(&o, ^{
@@ -119,7 +122,7 @@ static void MSRefreshScreen(void) {
            The game view is framed to the same shape (TunicGameRect); Stretch then fills the screen with it. */
         double ta = TunicAspectValue();
         if (ta > 0 && g_tvAspect <= 0) {
-            double sw = s.bounds.size.width, sh = s.bounds.size.height;
+            double sw = MAX(bs.width, bs.height), sh = MIN(bs.width, bs.height);
             if (sh * ta <= sw) { g_sh = sh; g_sw = round(sh * ta); } else { g_sw = sw; g_sh = round(sw / ta); }
         }
     });
@@ -2054,6 +2057,7 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
         }
         MSAddMacAPIs(); UMPrepareMetal();
         MacShimSetFrameCap(TunicFrameCapSetting());
+        MSRefreshScreen();          /* the start screen's Aspect Ratio: the screen size the game is told comes from it */
         win.rootViewController = [MSBootVC new];
         MSStatusCreate();
         MSWatchGameSettings();

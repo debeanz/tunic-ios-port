@@ -105,7 +105,7 @@ def main():
     needs = set()
     for src, dst in jobs:
         for line in rt.retarget(src, dst, "16.0", "18.0"):
-            if "rerouted" in line or "NOT" in line: print("   ", os.path.basename(dst) + ":", line)
+            if "rerouted" in line or "NOT" in line or "CameraResizer" in line: print("   ", os.path.basename(dst) + ":", line)
         needs |= shim_needs(dst)
     with open(os.path.join(HERE, "shim_needs.txt"), "w", newline="\n") as f:
         f.write("# symbols Tunic's retargeted binaries bind to libMacShim.dylib (written by tools/make_ipa.py)\n")
