@@ -1587,6 +1587,7 @@ static BOOL MSTextSetOption(NSMutableString *txt, NSString *name, NSString *valu
 static _Atomic double g_paceT;                      /* seconds per frame CyPort holds the game to, 0 = not pacing */
 static int g_paceMode = -1;                         /* 0 game, 1 auto, 30/40/60 fixed */
 static _Atomic int g_userCap;                       /* Tunic: Frame Rate setting (30/60/120), 0 = not set yet */
+static _Atomic BOOL g_hiRefreshOn;                  /* the screen runs at 120 Hz for the game (MSRefreshTicker) */
 static _Atomic int g_paceFPS;                       /* what g_paceT means, for the overlay/log */
 static int MSFrameRateChoice(void) {
     id c = MSConfig()[@"FrameRate"]; return [c respondsToSelector:@selector(intValue)] ? [c intValue] : 0;
@@ -1598,7 +1599,11 @@ static void MSPaceSet(int fps, NSString *why) {
 }
 static void MSPaceWait(void) {                      /* nextDrawable, on the game's render thread */
     double T = g_paceT; static __thread uint64_t next;
-    if (T <= 0) { next = 0; return; }
+    /* Tunic: on a 120 Hz screen the cap is kept by the display alone (presentAfterMinimumDuration, MSRefreshTicker): the
+       game then waits for a free drawable, in step with the refreshes. This CPU beat ran beside the screen's refresh and
+       drifted against it; with the screen at 60 Hz a frame that missed its slot showed a whole refresh later (33 ms),
+       and the sleeping let the GPU clock down (7.5 ms per frame at a 60 cap, 5-6 ms uncapped). Rolls stuttered at 60. */
+    if (T <= 0 || g_hiRefreshOn) { next = 0; return; }
     static mach_timebase_info_data_t tb; if (!tb.denom) mach_timebase_info(&tb);
     uint64_t per = (uint64_t)(T * 1e9 * tb.denom / tb.numer), early = (uint64_t)(0.0007 * 1e9 * tb.denom / tb.numer);
     uint64_t now = mach_absolute_time();
@@ -4067,9 +4072,11 @@ static NSString *MSGPUSample(void) {                    /* progress thread: bloc
        40, 120, uncapped, a custom Max FPS - gets 120 Hz, where 25 ms is exactly 3 refreshes. */
     int fps = d > 0 ? (int)lround(1 / d) : 0;
     BOOL fits60 = fps > 0 && fps <= 60 && fabs(60.0 / fps - lround(60.0 / fps)) < 0.05;
-    BOOL want = d >= 0 && !fits60 && !g_inBackground;
-    if (l.paused == !want) return;
-    l.paused = !want;
+    /* Tunic (Frame Rate setting): 120 Hz at every cap. A 60 FPS frame that misses its slot then shows 8 ms late instead of
+       a whole 60 Hz refresh (17 ms) late, and the cap is paced by the display (MSPaceWait) */
+    BOOL want = d >= 0 && (!fits60 || g_userCap > 0) && !g_inBackground;
+    if (l.paused == !want) { g_hiRefreshOn = want; return; }
+    l.paused = !want; g_hiRefreshOn = want;
     MSLogf(@"screen: %@ (game cap %@)", want ? @"asking for 120 Hz" : @"back to the normal refresh rate", fps ? [NSString stringWithFormat:@"%d FPS", fps] : @"none");
 }
 @end
