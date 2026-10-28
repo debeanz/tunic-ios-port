@@ -36,6 +36,7 @@ _AudioUnitRender
 _AudioUnitSetProperty
 _AudioUnitUninitialize
 _CFBundleCopyExecutableURL
+_CFRunLoopStop
 _CGAssociateMouseAndMouseCursorPosition
 _CGColorSpaceCreateWithName
 _CGColorSpaceRelease

@@ -427,6 +427,18 @@ UM_EXPORT CFURLRef um_CFBundleCopyExecutableURL(CFBundleRef b) {
         return CFBridgingRetain([NSURL fileURLWithPath:[MacShimMacAppRoot() stringByAppendingPathComponent:@"Contents/MacOS/Secret Legend"]]);
     return real ? real(b) : NULL;
 }
+/* Quit from the game's menu: Unity's Mac player tears itself down and then stops the AppKit run loop it saved,
+   which never ran on iOS (CFRunLoopStop traps on it). That is the player's only CFRunLoopStop call, so it ends the app. */
+UM_EXPORT void um_CFRunLoopStop(CFRunLoopRef rl) __asm("_CFRunLoopStop");
+UM_EXPORT void um_CFRunLoopStop(CFRunLoopRef rl) {
+    if (UMFromUnity(__builtin_return_address(0))) {
+        MacShimLogC("quit", "game asked to quit, exiting");
+        exit(0);
+    }
+    static void (*real)(CFRunLoopRef);
+    if (!real) real = (void (*)(CFRunLoopRef))dlsym(dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY | RTLD_NOLOAD), "CFRunLoopStop");
+    if (real) real(rl);
+}
 static IMP o_bundlePath, o_executablePath;
 static NSString *um_bundlePath(NSBundle *self, SEL _cmd) {
     if (self == NSBundle.mainBundle && UMFromUnity(__builtin_return_address(0)) && MacShimDataFolder()) return MacShimMacAppRoot();

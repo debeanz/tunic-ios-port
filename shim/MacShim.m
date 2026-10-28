@@ -2054,8 +2054,6 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
         }
         MSAddMacAPIs(); UMPrepareMetal();
         MacShimSetFrameCap(TunicFrameCapSetting());
-        MSRefreshScreen();            /* the start screen's Aspect Ratio: the screen the game sees takes that shape (it was
-                                         only measured when the start screen opened, so a new choice waited a launch) */
         win.rootViewController = [MSBootVC new];
         MSStatusCreate();
         MSWatchGameSettings();
@@ -4164,6 +4162,10 @@ static UIWindow *g_hudWin; static CATextLayer *g_hudText; static CALayer *g_hudB
 @implementation MSHUDTicker
 - (void)tick:(CADisplayLink *)l {
     static long long f0; static double t0, fps;
+    /* its own setting (launcher + Phone Settings), followed live */
+    BOOL on = [NSUserDefaults.standardUserDefaults boolForKey:@"TunicResReadout"];
+    if (g_hudWin.hidden == on) g_hudWin.hidden = !on;
+    if (!on) return;
     double now = CACurrentMediaTime(); long long f = g_frames;
     if (t0 > 0 && now - t0 >= 0.25) { fps = (f - f0) / (now - t0); f0 = f; t0 = now; } else if (t0 <= 0) { f0 = f; t0 = now; return; } else return;
     CAMetalLayer *gl = g_gameMetalLayer;
@@ -4175,8 +4177,7 @@ static UIWindow *g_hudWin; static CATextLayer *g_hudText; static CALayer *g_hudB
     [CATransaction begin]; [CATransaction setDisableActions:YES]; g_hudText.string = s; [CATransaction commit];
 }
 @end
-static void MSHUDStart(void) {                           /* main thread, at Play */
-    if (![NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"]) return;
+static void MSHUDStart(void) {                           /* main thread, at Play; shown while TunicResReadout is on */
     UIWindowScene *sc = MSAppScene();
     g_hudWin = sc ? [[UIWindow alloc] initWithWindowScene:sc] : [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     g_hudWin.windowLevel = UIWindowLevelAlert + 6; g_hudWin.userInteractionEnabled = NO; g_hudWin.backgroundColor = UIColor.clearColor;
@@ -4189,11 +4190,12 @@ static void MSHUDStart(void) {                           /* main thread, at Play
     UIFont *f = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
     g_hudText.font = (__bridge CFTypeRef)f; g_hudText.fontSize = 11; g_hudText.foregroundColor = [UIColor colorWithWhite:1 alpha:0.92].CGColor;
     g_hudText.string = @"…"; [g_hudBg addSublayer:g_hudText];
-    [g_hudWin.rootViewController.view.layer addSublayer:g_hudBg]; g_hudWin.hidden = NO;
+    [g_hudWin.rootViewController.view.layer addSublayer:g_hudBg];
+    g_hudWin.hidden = ![NSUserDefaults.standardUserDefaults boolForKey:@"TunicResReadout"];
     static MSHUDTicker *ticker; ticker = [MSHUDTicker new];
     CADisplayLink *dl = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(tick:)];
     dl.preferredFrameRateRange = CAFrameRateRangeMake(4, 8, 8); [dl addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
-    MSLogf(@"Metal HUD on; resolution readout bottom-left (MTL_HUD_ENABLED=%s)", getenv("MTL_HUD_ENABLED") ?: "unset");
+    MSLogf(@"resolution readout %s; Metal HUD MTL_HUD_ENABLED=%s", g_hudWin.hidden ? "off" : "on", getenv("MTL_HUD_ENABLED") ?: "unset");
 }
 static void MSStatusCreate(void) {                    /* main thread, before the game's main() */
     MSInstallPacing();

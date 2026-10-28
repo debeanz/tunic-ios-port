@@ -35,7 +35,8 @@ static NSString *const TCChanged = @"TunicSettingsChanged";
 static NSUserDefaults *TD(void) { return NSUserDefaults.standardUserDefaults; }
 __attribute__((constructor)) static void TCDefaults(void) {
     [TD() registerDefaults:@{ @"PortAspect": @0, @"PortScaling": @0, @"PortFrameRate": @1, @"PortTouchControls": @YES,
-                              @"PortTouchOpacity": @65, @"PortTouchSize": @100, @"PortFloatingStick": @NO, @"PortHaptics": @YES }];
+                              @"PortTouchOpacity": @65, @"PortTouchSize": @100, @"PortFloatingStick": @NO, @"PortHaptics": @YES,
+                              @"TunicResReadout": @NO }];
 }
 static NSInteger TCInt(NSString *k) { return [TD() integerForKey:k]; }
 static BOOL TCBool(NSString *k) { return [TD() boolForKey:k]; }
@@ -462,6 +463,7 @@ static NSArray<NSString *> *TCPercent(int from, int to, int step) {
         [self row:@"Touch Size" values:TCPercent(70, 150, 10) get:^{ return (TCInt(@"PortTouchSize") - 70) / 10; } set:^(NSInteger i) { [TD() setInteger:70 + i * 10 forKey:@"PortTouchSize"]; touch(); }],
         [self row:@"Left Stick" values:@[ @"Fixed", @"Floating" ] get:^{ return (NSInteger)TCBool(@"PortFloatingStick"); } set:^(NSInteger i) { [TD() setBool:i == 1 forKey:@"PortFloatingStick"]; touch(); }],
         [self row:@"Vibration" values:offOn get:^{ return (NSInteger)TCBool(@"PortHaptics"); } set:^(NSInteger i) { [TD() setBool:i == 1 forKey:@"PortHaptics"]; touch(); }],
+        [self row:@"Resolution Readout" values:offOn get:^{ return (NSInteger)TCBool(@"TunicResReadout"); } set:^(NSInteger i) { [TD() setBool:i == 1 forKey:@"TunicResReadout"]; }],
     ];
     for (TCRow *r in _rows) {
         r.view = [UIView new]; [_scroll addSubview:r.view];

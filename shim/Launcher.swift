@@ -6,6 +6,7 @@
 // Settings panel, TunicControls.m), TunicMetalHUD.
 import SwiftUI
 import UIKit
+import MachO
 
 /// the colour between the start screen and the game (MacShim.m MSTunicNight): Play fades into it, no flash
 private let night = Color(red: 0.067, green: 0.082, blue: 0.090)
@@ -80,23 +81,42 @@ private struct PressScale: ButtonStyle {
     }
 }
 
-/// paper grain: fixed speckle (seeded, the same every time), drawn once
+/// paper grain: fixed speckle (seeded, the same every time), drawn once on the CPU into a 256 pt tile.
+/// Not a SwiftUI Canvas or drawingGroup: those render through Metal in this process, and a Metal device made before
+/// Play fixes whether the Metal HUD shows (MTL_HUD_ENABLED is read when the first device is made).
 private struct Grain: View {
     let ink: Color
-    var body: some View {
-        Canvas { ctx, size in
+    private static var tiles: [String: UIImage] = [:]
+    private static func tile(_ ink: Color) -> UIImage {
+        let key = ink.description
+        if let t = tiles[key] { return t }
+        let side: CGFloat = 256
+        let fmt = UIGraphicsImageRendererFormat.preferred(); fmt.opaque = false
+        let ui = UIColor(ink)
+        let img = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: fmt).image { r in
             var seed: UInt64 = 0x7E57_C0DE
             func rnd() -> CGFloat { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return CGFloat(seed >> 33) / CGFloat(1 << 31) }
-            let count = Int(size.width * size.height / 260)
-            for _ in 0..<count {
-                let r = rnd() * 0.9 + 0.3
-                ctx.fill(Path(ellipseIn: CGRect(x: rnd() * size.width, y: rnd() * size.height, width: r, height: r)),
-                         with: .color(ink.opacity(0.035 + rnd() * 0.03)))
+            for _ in 0..<Int(side * side / 260) {
+                let d = rnd() * 0.9 + 0.3
+                ui.withAlphaComponent(0.035 + rnd() * 0.03).setFill()
+                r.cgContext.fillEllipse(in: CGRect(x: rnd() * side, y: rnd() * side, width: d, height: d))
             }
         }
-        // no .drawingGroup(): it renders through Metal, and the first Metal device must come after the Metal HUD switch
-        .allowsHitTesting(false)
+        tiles[key] = img
+        return img
     }
+    var body: some View {
+        Image(uiImage: Grain.tile(ink)).resizable(resizingMode: .tile).allowsHitTesting(false)
+    }
+}
+
+/// Whether a Metal device already exists in this process: making one loads the GPU driver (AGXMetal...).
+/// Once it is there, a Metal HUD change only applies after Tunic restarts.
+private func metalDeviceMade() -> Bool {
+    for i in 0..<_dyld_image_count() {
+        if let n = _dyld_get_image_name(i), strstr(n, "AGXMetal") != nil { return true }
+    }
+    return false
 }
 
 private struct LauncherView: View {
@@ -116,7 +136,11 @@ private struct LauncherView: View {
     @AppStorage("PortFloatingStick") private var floatingStick = false
     @AppStorage("PortHaptics") private var haptics = true
     @AppStorage("TunicMetalHUD") private var metalHUD = false
+    @AppStorage("TunicResReadout") private var resReadout = false
     @State private var appeared = false
+    @State private var hudRestart = false
+    /// the Metal HUD state the process's first Metal device was made with (nil while no device exists)
+    @State private var hudAtDevice: Bool? = nil
     @State private var leaving = false
 
     private var device: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
@@ -128,17 +152,6 @@ private struct LauncherView: View {
         return "Not found"
     }
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0" }
-    /// Resolution = render size: the screen's shape for the chosen Aspect Ratio, times the shim's mode scale (MacShim.m
-    /// g_modeScales; the game renders exactly this). Recomputed live, so the list follows the Aspect Ratio.
-    private static let modeScales: [Double] = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
-    private func resLabel(_ i: Int) -> String {
-        guard model.resolutions.count == Self.modeScales.count else { return model.resolutions[i] }
-        let b = UIScreen.main.bounds.size, w = max(b.width, b.height), h = min(b.width, b.height)
-        let a = [0, 2106.0 / 1084.0, 16.0 / 9.0, 4.0 / 3.0][max(0, min(3, aspect))]
-        let sw = a == 0 ? w : (h * a <= w ? (h * a).rounded() : w), sh = a == 0 ? h : (h * a <= w ? h : (w / a).rounded())
-        let k = Self.modeScales[i]
-        return "\(Int((sw * k).rounded())) × \(Int((sh * k).rounded()))"
-    }
     private func tick() { UISelectionFeedbackGenerator().selectionChanged() }
 
     var body: some View {
@@ -164,7 +177,17 @@ private struct LauncherView: View {
         .onChange(of: aspect) { _ in tick() }.onChange(of: scaling) { _ in tick() }.onChange(of: frameRate) { _ in tick() }
         .onChange(of: touchControls) { _ in tick() }.onChange(of: floatingStick) { _ in tick() }.onChange(of: haptics) { _ in tick() }
         .onChange(of: metalHUD) { on in       // Metal reads this when the first Metal device is made: set it now, before Play
-            tick(); if on { setenv("MTL_HUD_ENABLED", "1", 1) } else { unsetenv("MTL_HUD_ENABLED") }
+            tick()
+            if hudAtDevice == nil && metalDeviceMade() { hudAtDevice = getenv("MTL_HUD_ENABLED") != nil }
+            if on { setenv("MTL_HUD_ENABLED", "1", 1) } else { unsetenv("MTL_HUD_ENABLED") }
+            if let made = hudAtDevice, made != on { hudRestart = true }
+        }
+        .onChange(of: resReadout) { _ in tick() }
+        .alert(metalHUD ? "Metal HUD turns on when Tunic restarts" : "Metal HUD turns off when Tunic restarts", isPresented: $hudRestart) {
+            Button("Quit Tunic") { exit(0) }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("The setting is saved. Quit now and open Tunic again to apply it.")
         }
         .onChange(of: smoothPacing) { _ in tick() }.onChange(of: lowLatency) { _ in tick() }
         .onChange(of: model.overlay) { _ in tick() }.onChange(of: model.resolution) { _ in tick() }
@@ -224,11 +247,11 @@ private struct LauncherView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
                 section(1, "Display") {
-                    row("Resolution", note: "What the game renders; the Aspect Ratio sets its shape." + (model.notes[model.resolution].isEmpty ? "" : " " + model.notes[model.resolution].capitalizedFirst + ".")) {
-                        chipMenu(resLabel(model.resolution)) {
+                    row("Resolution", note: model.notes[model.resolution].isEmpty ? nil : model.notes[model.resolution].capitalizedFirst) {
+                        chipMenu(model.resolutions[model.resolution]) {
                             Picker("Resolution", selection: $model.resolution) {
-                                ForEach(Array(model.resolutions.indices).reversed(), id: \.self) { i in
-                                    Text(model.notes[i].isEmpty ? resLabel(i) : "\(resLabel(i))  ·  \(model.notes[i])").tag(i)
+                                ForEach(Array(model.resolutions.enumerated()).reversed(), id: \.offset) { i, r in
+                                    Text(model.notes[i].isEmpty ? r : "\(r)  ·  \(model.notes[i])").tag(i)
                                 }
                             }
                         }
@@ -268,7 +291,8 @@ private struct LauncherView: View {
                         Picker("Performance overlay", selection: $model.overlay) { Text("Off").tag(0); Text("FPS").tag(1); Text("Detailed").tag(2) }
                             .pickerStyle(.segmented).frame(width: 200)
                     }
-                    row("Metal HUD", note: "Apple's performance HUD over the game: frame rate, frame and GPU time, memory. The exact render resolution shows in the bottom-left corner.") { toggle($metalHUD) }
+                    row("Metal HUD", note: "Apple's performance HUD over the game: frame rate, frame and GPU time, memory.") { toggle($metalHUD) }
+                    row("Resolution readout", note: "The exact render and screen resolution, bottom-left in the game.") { toggle($resReadout) }
                     row("Smooth frame pacing", note: smoothPacing ? "Even frame times: holds 120, 60, 40 or 30 FPS, whatever the \(device) keeps up with." : "Off: the frame rate setting only.") { toggle($smoothPacing) }
                 }
                 section(4, "Data") {
