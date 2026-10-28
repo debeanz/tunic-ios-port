@@ -3405,15 +3405,12 @@ static GCController *ms_current(id self, SEL _cmd) {
 }
 static GCExtendedGamepad *g_pad;     /* our own handle, so the hooks below only see the game's calls */
 /* Tunic: while the Phone Settings panel (TunicControls.m) is open the game gets no controller input: a real pad's
-   callbacks are dropped and its gamepad reads come back idle (the panel reads the real one through the original IMPs). */
+   callbacks are dropped and the game is paused (told the app is inactive). Its gamepad reads are left alone: they used
+   to come back from a stand-in "idle" controller made on first use - inside these very hooks, so making it called them
+   again, and opening the panel with an Xbox controller connected killed the app without a log (device, 2026-10-28). */
 static _Atomic BOOL g_inputBlocked;
-static GCExtendedGamepad *MSIdlePad(void) {
-    static GCController *c; static dispatch_once_t o; dispatch_once(&o, ^{ c = [GCController controllerWithExtendedGamepad]; });
-    return c.extendedGamepad;
-}
 static IMP g_origPhys;
 static id ms_physicalInputProfile(GCController *self, SEL _cmd) {
-    if (g_inputBlocked && self != g_vpad) return MSIdlePad();
     id r = ((id (*)(id, SEL))g_origPhys)(self, _cmd);
     static BOOL seen; if (self == g_vpad && !seen) { seen = YES; MSLogf(@"touch pad: the game is reading the virtual controller (physicalInputProfile, %@)", r == g_pad ? @"same object" : NSStringFromClass([r class])); }
     return r;
@@ -3440,7 +3437,6 @@ static NSString *ms_vendorName(GCController *self, SEL _cmd) {
 static IMP g_origExtGamepad;
 static id ms_extendedGamepad(GCController *self, SEL _cmd) {
     static BOOL seen; if (self == g_vpad && !seen) { seen = YES; MSLogf(@"touch pad: the game is reading the virtual controller (extendedGamepad)"); }
-    if (g_inputBlocked && self != g_vpad) return MSIdlePad();
     return ((id (*)(id, SEL))g_origExtGamepad)(self, _cmd);
 }
 /* The game reads gamepads through callbacks (setValueChangedHandler: on the gamepad / its elements), not by polling.
