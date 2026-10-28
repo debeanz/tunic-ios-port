@@ -128,6 +128,17 @@ private struct LauncherView: View {
         return "Not found"
     }
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0" }
+    /// Resolution = render size: the screen's shape for the chosen Aspect Ratio, times the shim's mode scale (MacShim.m
+    /// g_modeScales; the game renders exactly this). Recomputed live, so the list follows the Aspect Ratio.
+    private static let modeScales: [Double] = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+    private func resLabel(_ i: Int) -> String {
+        guard model.resolutions.count == Self.modeScales.count else { return model.resolutions[i] }
+        let b = UIScreen.main.bounds.size, w = max(b.width, b.height), h = min(b.width, b.height)
+        let a = [0, 2106.0 / 1084.0, 16.0 / 9.0, 4.0 / 3.0][max(0, min(3, aspect))]
+        let sw = a == 0 ? w : (h * a <= w ? (h * a).rounded() : w), sh = a == 0 ? h : (h * a <= w ? h : (w / a).rounded())
+        let k = Self.modeScales[i]
+        return "\(Int((sw * k).rounded())) × \(Int((sh * k).rounded()))"
+    }
     private func tick() { UISelectionFeedbackGenerator().selectionChanged() }
 
     var body: some View {
@@ -213,11 +224,11 @@ private struct LauncherView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
                 section(1, "Display") {
-                    row("Resolution", note: model.notes[model.resolution].isEmpty ? nil : model.notes[model.resolution].capitalizedFirst) {
-                        chipMenu(model.resolutions[model.resolution]) {
+                    row("Resolution", note: "What the game renders; the Aspect Ratio sets its shape." + (model.notes[model.resolution].isEmpty ? "" : " " + model.notes[model.resolution].capitalizedFirst + ".")) {
+                        chipMenu(resLabel(model.resolution)) {
                             Picker("Resolution", selection: $model.resolution) {
-                                ForEach(Array(model.resolutions.enumerated()).reversed(), id: \.offset) { i, r in
-                                    Text(model.notes[i].isEmpty ? r : "\(r)  ·  \(model.notes[i])").tag(i)
+                                ForEach(Array(model.resolutions.indices).reversed(), id: \.self) { i in
+                                    Text(model.notes[i].isEmpty ? resLabel(i) : "\(resLabel(i))  ·  \(model.notes[i])").tag(i)
                                 }
                             }
                         }

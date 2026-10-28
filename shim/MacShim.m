@@ -2054,6 +2054,8 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
         }
         MSAddMacAPIs(); UMPrepareMetal();
         MacShimSetFrameCap(TunicFrameCapSetting());
+        MSRefreshScreen();            /* the start screen's Aspect Ratio: the screen the game sees takes that shape (it was
+                                         only measured when the start screen opened, so a new choice waited a launch) */
         win.rootViewController = [MSBootVC new];
         MSStatusCreate();
         MSWatchGameSettings();
