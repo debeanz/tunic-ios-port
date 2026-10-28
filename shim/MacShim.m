@@ -3235,6 +3235,7 @@ static void MSSmoothFrame(double tOut) {                 /* render thread, after
     static double last, winStart, probeAt, backoff = 20; static int n, late, step, top, probing, probeFrom, probeWins, badWins;
     int maxHz = (int)lround(g_fps); if (maxHz < 60) maxHz = 60;
     double gd = g_gameMinDur; int cap = gd > 0 ? (int)lround(1 / gd) : maxHz; if (cap > maxHz) cap = maxHz;
+    int gcap = cap;                                           /* what the game itself holds to: pacing has nothing to do at it */
     int uc = g_userCap; if (uc > 0 && cap > uc) cap = uc;      /* Tunic: the Frame Rate setting is the ceiling */
     static const int steps[] = { 120, 60, 40, 30 };
     int newTop = 0; for (int i = 0; i < 4; i++) if (steps[i] <= cap && maxHz % steps[i] == 0) { newTop = steps[i]; break; }
@@ -3243,7 +3244,11 @@ static void MSSmoothFrame(double tOut) {                 /* render thread, after
         if (!step || step > top) step = top; else if (step < top) probeAt = tOut + 3;
         if (top) MSLogf(@"smooth pacing: game cap %d FPS, steps up to %d", cap, top);
     }
-    if (top <= 30) { if (g_paceT > 0) MSPaceSet(0, @"smooth pacing: nothing to smooth"); last = 0; return; }
+    if (top <= 30) {                                          /* nothing to smooth - but a 30 FPS ceiling still has to hold */
+        int want = top > 0 && top < gcap ? top : 0;
+        if ((int)lround(g_paceT > 0 ? 1 / g_paceT : 0) != want) MSPaceSet(want, want ? @"Frame Rate setting" : @"smooth pacing: nothing to smooth");
+        last = 0; return;
+    }
     if (last > 0) {
         double dt = tOut - last;
         if (dt > 0.25) { n = late = 0; winStart = tOut; }   /* loading / hitch: not a pacing question */
@@ -3271,7 +3276,9 @@ static void MSSmoothFrame(double tOut) {                 /* render thread, after
         }
         n = late = 0; winStart = tOut;
     }
-    if (step != was || (step >= cap) != (g_paceT <= 0)) MSPaceSet(step >= cap ? 0 : step, why ?: @"smooth pacing");
+    /* pace whenever the step is below what the GAME holds to - the Frame Rate ceiling (cap) is not the game's own limit,
+       so step == cap < gcap still needs pacing (it didn't: 60 FPS chosen, the game ran at 120) */
+    if (step != was || (step >= gcap) != (g_paceT <= 0)) MSPaceSet(step >= gcap ? 0 : step, why ?: @"smooth pacing");
 }
 static id ms_nextDrawable(id self, SEL _cmd) {
     if (self == g_mirrorLayer) return ((id (*)(id, SEL))g_origNextDrawable)(self, _cmd);
