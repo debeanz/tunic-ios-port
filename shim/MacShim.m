@@ -73,6 +73,7 @@ const char *MacShimMapLibraryPath(const char *path, char *buf, size_t len);
 void UMPrepareMetal(void);
 UIView *TunicPadCreate(UIView *parent);
 CGRect TunicGameRect(CGRect bounds); BOOL TunicStretch(void); int TunicFrameCapSetting(void);
+void MacShimSetFrameCap(int fps);
 static BOOL g_cursorHidden = NO, g_pointerLocked = NO;
 static CGPoint g_mouse;                                  /* Cocoa coords: origin bottom-left, points */
 static NSUInteger g_modFlags = 0;
