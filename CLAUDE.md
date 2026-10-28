@@ -28,6 +28,7 @@ Run the user's own GOG **Mac** copy of Tunic natively on iPhone/iPad the way CyP
 - Audio confirmed working (Playback session). Metal HUD: no Metal device is made before Play any more (MSAddMacAPIs / UMPrepareMetal run in MSBootDelegate's go block after setenv MTL_HUD_ENABLED); not yet confirmed on device.
 - Built 2026-10-28, not yet device-tested: `shim/TunicControls.m` (kit controller layout + Phone Settings gear panel + Port* settings), new `shim/Launcher.swift` (Tunic title page + manual-page settings), aspect/scaling (MSRootVC viewDidLayoutSubviews + MSLayerFrame), frame cap (g_userCap / MacShimSetFrameCap), panel input blocking (g_inputBlocked, idle pad, msBecomeActive:NO), restyled loading screen.
 - Left out on purpose: kit "UI Size" (Tunic's UI scale is inside the game; no clean mapping yet) and CyPort "Cloud saves" (GameCloud syncs Cyberpunk's GOG saves).
+- Aspect ratio removed (user's decision, 2026-10-28): Tunic's `CameraResizer.Update` (GameAssembly 0x57f0a4) keeps the 3D view between 1.6:1 and 16:9 and pillarboxes anything wider, so the game always renders 16:9 (`TunicAspectValue`). Screen scaling has a user-requested third option: Fit, Stretch (whole screen), Stretch 1.943:1 (`TunicStretchRect`). Lifting the clamp (`patch_camera_resizer`, `TUNIC_WIDE_CAMERA=1`) froze the game twice on device and dropped it to 30 FPS: off.
 
 ## Next steps
 1. Device-test the launcher, controls, gear panel and every setting (checklist); Metal HUD.
@@ -37,8 +38,8 @@ Run the user's own GOG **Mac** copy of Tunic natively on iPhone/iPad the way CyP
 
 ## Rules the user set
 - **Settings:** keep all of CyPort's settings and behaviour unchanged (Resolution, Performance overlay Off/FPS/Detailed, Smooth frame pacing, Low-latency input, Look sensitivity, Cloud saves, Game data import/download, 🎮 pad toggle, restart "quit?" prompt). Only ADD the unity-ios-port mobile kit settings CyPort lacks, with the kit's labels and defaults (`~/.claude/plugins/cache/debeanz-ports/unity-ios-port/1.2.0/shared/mobile-kit/MobileSettings.cs`, `MobileDisplay.cs`):
-  - Aspect ratio: iPhone Default, 1.943:1, 16:9, 4:3 (default iPhone Default)
-  - Scaling: Fit, Stretch (Fit)
+  - Aspect ratio: iPhone Default, 1.943:1, 16:9, 4:3 (default iPhone Default). Tunic: removed by the user, the game only draws 16:9
+  - Scaling: Fit, Stretch (Fit). Tunic: plus Stretch 1.943:1 (user's request)
   - Frame rate: 30, 60, 120 FPS (ProMotion) (60)
   - UI size: Small 0.85x, Default, Large 1.2x (Default). If it can't map cleanly onto Tunic, tell the user; don't silently drop it
   - Touch controls on/off (on), Touch opacity 10–100% (65), Touch size 50–200% (100), Left stick Fixed/Floating (Fixed), Haptics (on)

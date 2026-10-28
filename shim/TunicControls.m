@@ -6,7 +6,7 @@
  * Presses go into the virtual game controller (MacShim.m), which the game reads like a real Xbox pad.
  *
  * Settings (NSUserDefaults; Launcher.swift writes the same keys):
- *   PortAspect 0..3 (iPhone Default, 1.943:1, 16:9, 4:3)   PortScaling 0 Fit / 1 Stretch / 2 Stretch 1.943:1
+ *   PortScaling 0 Fit / 1 Stretch / 2 Stretch 1.943:1 (the game always renders 16:9: no Aspect Ratio setting, see TunicAspectValue)
  *   PortFrameRate 0..2 (30/60/120)
  *   PortTouchControls   PortTouchOpacity 20..100   PortTouchSize 70..150   PortFloatingStick   PortHaptics
  */
@@ -35,14 +35,13 @@ static void TCLog(NSString *fmt, ...) {
 static NSString *const TCChanged = @"TunicSettingsChanged";
 static NSUserDefaults *TD(void) { return NSUserDefaults.standardUserDefaults; }
 __attribute__((constructor)) static void TCDefaults(void) {
-    [TD() registerDefaults:@{ @"PortAspect": @0, @"PortScaling": @0, @"PortFrameRate": @1, @"PortTouchControls": @YES,
+    [TD() registerDefaults:@{ @"PortScaling": @0, @"PortFrameRate": @1, @"PortTouchControls": @YES,
                               @"PortTouchOpacity": @65, @"PortTouchSize": @100, @"PortFloatingStick": @NO, @"PortHaptics": @YES,
                               @"TunicResReadout": @NO }];
 }
 static NSInteger TCInt(NSString *k) { return [TD() integerForKey:k]; }
 static BOOL TCBool(NSString *k) { return [TD() boolForKey:k]; }
 
-static const double TCAspects[] = { 0, 2106.0 / 1084.0, 16.0 / 9.0, 4.0 / 3.0 };
 static CGRect TCCentred(CGRect b, double a) {
     if (a <= 0 || b.size.width <= 0 || b.size.height <= 0) return b;
     double w = b.size.width, h = b.size.height;
@@ -52,19 +51,15 @@ static CGRect TCCentred(CGRect b, double a) {
 /* Screen Scaling: 0 Fit, 1 Stretch (the whole screen), 2 Stretch 1.943:1 (a centred 1.943:1 frame, the bars beside the
    Dynamic Island) */
 BOOL TunicStretch(void) { NSInteger s = TCInt(@"PortScaling"); return s == 1 || s == 2; }
-/* width:height the game renders at (0 = the phone's own). Fit: the Aspect Ratio setting. Tunic itself never draws wider
-   than 16:9 (its CameraResizer adds black side bars inside the picture), so the stretch modes give it 16:9 - 4:3 stays
-   4:3 - and stretch that picture: nothing is spent on bars and no bars get stretched. */
-double TunicAspectValue(void) {
-    NSInteger i = TCInt(@"PortAspect"); double a = i > 0 && i <= 3 ? TCAspects[i] : 0;
-    if (TunicStretch() && (a <= 0 || a > 16.0 / 9.0)) a = 16.0 / 9.0;
-    return a;
-}
+/* width:height the game renders at: always 16:9. Tunic never draws wider (its CameraResizer adds black side bars inside
+   the picture on wider screens), so the kit's Aspect Ratio setting is left out: every shape it offered either matched
+   16:9 or only made the picture smaller. Screen Scaling decides the shape on screen; nothing is spent on bars. */
+double TunicAspectValue(void) { return 16.0 / 9.0; }
 int TunicFrameCapSetting(void) { static const int f[] = { 30, 60, 120 }; NSInteger i = TCInt(@"PortFrameRate"); return f[i < 0 ? 0 : i > 2 ? 2 : i]; }
 /* the game view inside the screen: the render shape, centred (the rest stays black) */
 CGRect TunicGameRect(CGRect b) { return TCCentred(b, TunicAspectValue()); }
 /* where a stretched picture goes: the whole screen, or the centred 1.943:1 frame */
-CGRect TunicStretchRect(CGRect b) { return TCInt(@"PortScaling") == 2 ? TCCentred(b, TCAspects[1]) : b; }
+CGRect TunicStretchRect(CGRect b) { return TCInt(@"PortScaling") == 2 ? TCCentred(b, 2106.0 / 1084.0) : b; }
 
 /* ================================================================ look (TouchStyle) */
 static UIColor *TCBody(CGFloat a) { return [UIColor colorWithRed:0.075 green:0.08 blue:0.10 alpha:a]; }   /* smoked glass */
@@ -466,7 +461,6 @@ static NSArray<NSString *> *TCPercent(int from, int to, int step) {
     void (^touch)(void) = ^{ [NSNotificationCenter.defaultCenter postNotificationName:TCChanged object:nil]; };
     NSArray *offOn = @[ @"Off", @"On" ];
     _rows = @[
-        [self row:@"Aspect Ratio" values:@[ @"iPhone Default", @"1.943:1", @"16:9", @"4:3" ] get:^{ return TCInt(@"PortAspect"); } set:^(NSInteger i) { [TD() setInteger:i forKey:@"PortAspect"]; display(); }],
         [self row:@"Screen Scaling" values:@[ @"Fit", @"Stretch", @"Stretch 1.943:1" ] get:^{ return TCInt(@"PortScaling"); } set:^(NSInteger i) { [TD() setInteger:i forKey:@"PortScaling"]; display(); }],
         [self row:@"Frame Rate" values:@[ @"30 FPS", @"60 FPS", @"120 FPS (ProMotion)" ] get:^{ return TCInt(@"PortFrameRate"); } set:^(NSInteger i) { [TD() setInteger:i forKey:@"PortFrameRate"]; MacShimSetFrameCap(TunicFrameCapSetting()); }],
         [self row:@"Touch Controls" values:offOn get:^{ return (NSInteger)TCBool(@"PortTouchControls"); } set:^(NSInteger i) { [TD() setBool:i == 1 forKey:@"PortTouchControls"]; touch(); }],

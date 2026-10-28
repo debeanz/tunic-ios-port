@@ -117,10 +117,10 @@ static void MSRefreshScreen(void) {
             if (x && x.bounds.size.height > 0 && MSCfgD(@"TVOut", 1) != 0 && MSCfgD(@"TVShape", 1) != 0) g_tvAspect = x.bounds.size.width / x.bounds.size.height;
         });
         if (g_tvAspect > 0) g_sw = round(g_sh * g_tvAspect);
-        /* Tunic: Aspect Ratio (start screen / Phone Settings). Unity renders a full-screen window at the screen's size,
-           so the shape has to be the screen's: narrower than the phone = keep the height, wider = keep the width.
-           The game view is framed to the same shape (TunicGameRect); the stretch modes give 16:9 (Tunic's widest) and stretch
-           its layer over the screen or a 1.943:1 frame (MSLayerFrame). */
+        /* Tunic: the game is told its screen is 16:9 (TunicAspectValue - the widest it draws), so it spends nothing on
+           black bars. Unity renders a full-screen window at the screen's size, so the screen gets that shape: the phone's
+           height, 16:9 width. The game view is framed the same (TunicGameRect, Fit) or its layer is stretched over the
+           screen or a 1.943:1 frame (Screen Scaling, MSLayerFrame). */
         double ta = TunicAspectValue();
         if (ta > 0 && g_tvAspect <= 0) {
             double sw = MAX(bs.width, bs.height), sh = MIN(bs.width, bs.height);
@@ -419,7 +419,7 @@ static _Atomic int g_gcmCount;                   /* GameController mice connecte
 - (BOOL)prefersPointerLocked { return g_pointerLocked || g_gcmCount > 0; }   /* a locked pointer is what makes iOS send raw mouse motion */
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
-/* Tunic: Aspect Ratio (Phone Settings) - the game view at the chosen shape, centred; the game renders at that size */
+/* Tunic: the game view at the game's 16:9 shape, centred; the game renders at that size */
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     for (UIView *v in self.view.subviews) if ([v isKindOfClass:MSHostView.class]) v.frame = TunicGameRect(self.view.bounds);
@@ -432,7 +432,7 @@ static CGRect MSLayerFrame(UIView *host) {
         return [host convertRect:TunicStretchRect(host.superview.bounds) fromView:host.superview];
     return host.bounds;
 }
-/* Phone Settings changed Aspect Ratio / Screen Scaling: lay the game windows out again (main thread) */
+/* Phone Settings changed Screen Scaling: lay the game windows out again (main thread) */
 void MacShimApplyDisplay(void) {
     MSMainAsync(^{
         /* the screen the game is told about takes the new shape; Unity re-reads it like a Mac display change */
@@ -443,8 +443,7 @@ void MacShimApplyDisplay(void) {
             [root setNeedsLayout]; [root layoutIfNeeded];
             for (UIView *v in root.subviews) if ([v isKindOfClass:MSHostView.class]) { [v setNeedsLayout]; [v layoutIfNeeded]; }
         }
-        MSLogf(@"display: aspect %ld, scaling %ld, game screen %.0fx%.0f", (long)[NSUserDefaults.standardUserDefaults integerForKey:@"PortAspect"],
-               (long)[NSUserDefaults.standardUserDefaults integerForKey:@"PortScaling"], g_sw, g_sh);
+        MSLogf(@"display: scaling %ld, game screen %.0fx%.0f", (long)[NSUserDefaults.standardUserDefaults integerForKey:@"PortScaling"], g_sw, g_sh);
     });
 }
 void MacShimLogC(const char *what, const char *detail) { MSLogf(@"%s: %s", what, detail); }   /* for MacShimC.c */
@@ -2060,7 +2059,7 @@ void *ms_pthread_get_stackaddr_np(pthread_t t) {
         }
         MSAddMacAPIs(); UMPrepareMetal();
         MacShimSetFrameCap(TunicFrameCapSetting());
-        MSRefreshScreen();          /* the start screen's Aspect Ratio: the screen size the game is told comes from it */
+        MSRefreshScreen();          /* the 16:9 screen size the game is told */
         win.rootViewController = [MSBootVC new];
         MSStatusCreate();
         MSWatchGameSettings();

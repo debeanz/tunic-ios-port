@@ -129,7 +129,6 @@ private struct LauncherView: View {
     @AppStorage("CyPortLowLatency") private var lowLatency = false
     @AppStorage("CyPortSmoothPacing") private var smoothPacing = true
     // the mobile kit's settings (shared with the in-game Phone Settings panel)
-    @AppStorage("PortAspect") private var aspect = 0
     @AppStorage("PortScaling") private var scaling = 0
     @AppStorage("PortFrameRate") private var frameRate = 1
     @AppStorage("PortTouchControls") private var touchControls = true
@@ -155,24 +154,21 @@ private struct LauncherView: View {
     }
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0" }
     private func tick() { UISelectionFeedbackGenerator().selectionChanged() }
-    /// render size of mode i for the current Aspect Ratio and Screen scaling, worked out the way the shim does it
-    /// (TunicAspectValue / MSRefreshScreen / MSModeName): the landscape screen in points, shaped, times the mode's scale.
+    /// render size of mode i, worked out the way the shim does it (TunicAspectValue / MSRefreshScreen / MSModeName):
+    /// the landscape screen in points shaped to 16:9 (Tunic's only shape), times the mode's scale.
     private func modeLabel(_ i: Int) -> String {
         let b = UIScreen.main.bounds.size
         var w = Double(max(b.width, b.height)), h = Double(min(b.width, b.height))
-        let shapes = [0, 2106.0 / 1084.0, 16.0 / 9.0, 4.0 / 3.0]
-        var t = aspect > 0 && aspect < shapes.count ? shapes[aspect] : 0
-        if scaling == 1 || scaling == 2, t == 0 || t > 16.0 / 9.0 { t = 16.0 / 9.0 }   // stretch: Tunic's 16:9 (TunicAspectValue)
-        if t > 0 { if h * t <= w { w = (h * t).rounded() } else { h = (w / t).rounded() } }
+        let t = 16.0 / 9.0
+        if h * t <= w { w = (h * t).rounded() } else { h = (w / t).rounded() }
         let k = MacShimModeScale(Int32(i))
         return "\(Int(w * k + 0.5)) × \(Int(h * k + 0.5))"
     }
     private var scalingNote: String {
-        let src = aspect == 3 ? "The 4:3" : "Tunic's 16:9"
         switch scaling {
-        case 1: return "\(src) picture stretched over the whole screen."
-        case 2: return "\(src) picture stretched to 1.943:1, black bars beside the Dynamic Island."
-        default: return "The picture keeps its shape; black bars fill the rest."
+        case 1: return "Tunic's 16:9 picture stretched over the whole screen."
+        case 2: return "Tunic's 16:9 picture stretched to 1.943:1, black bars beside the Dynamic Island."
+        default: return "Tunic's own 16:9 shape; black bars fill the rest."
         }
     }
 
@@ -196,7 +192,7 @@ private struct LauncherView: View {
         .persistentSystemOverlays(.hidden)
         .statusBarHidden(true)
         .onAppear { withAnimation(.easeOut(duration: 0.5)) { appeared = true } }
-        .onChange(of: aspect) { _ in tick() }.onChange(of: scaling) { _ in tick() }.onChange(of: frameRate) { _ in tick() }
+        .onChange(of: scaling) { _ in tick() }.onChange(of: frameRate) { _ in tick() }
         .onChange(of: touchControls) { _ in tick() }.onChange(of: floatingStick) { _ in tick() }.onChange(of: haptics) { _ in tick() }
         .onChange(of: metalHUD) { on in       // Metal reads this when the first Metal device is made: set it now, before Play
             tick()
@@ -277,13 +273,6 @@ private struct LauncherView: View {
                                     Text(modeLabel(i))
                                     if !model.notes[i].isEmpty { Text(model.notes[i].capitalizedFirst) }
                                 }
-                            }
-                        }
-                    }
-                    row("Aspect ratio") {
-                        chipMenu(["iPhone Default", "1.943:1", "16:9", "4:3"][max(0, min(3, aspect))]) {
-                            Picker("Aspect ratio", selection: $aspect) {
-                                Text("iPhone Default").tag(0); Text("1.943:1").tag(1); Text("16:9").tag(2); Text("4:3").tag(3)
                             }
                         }
                     }
