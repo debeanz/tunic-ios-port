@@ -40,6 +40,8 @@ __attribute__((constructor)) static void TCDefaults(void) {
 static NSInteger TCInt(NSString *k) { return [TD() integerForKey:k]; }
 static BOOL TCBool(NSString *k) { return [TD() boolForKey:k]; }
 
+/* width:height for the Aspect Ratio setting, 0 = the phone's own */
+double TunicAspectValue(void) { static const double asp[] = { 0, 2106.0 / 1084.0, 16.0 / 9.0, 4.0 / 3.0 }; NSInteger i = TCInt(@"PortAspect"); return i > 0 && i <= 3 ? asp[i] : 0; }
 int TunicFrameCapSetting(void) { static const int f[] = { 30, 60, 120 }; NSInteger i = TCInt(@"PortFrameRate"); return f[i < 0 ? 0 : i > 2 ? 2 : i]; }
 BOOL TunicStretch(void) { return TCInt(@"PortScaling") == 1 && TCInt(@"PortAspect") > 0; }
 /* the game view inside the screen for the Aspect Ratio setting (centred; the rest stays black) */

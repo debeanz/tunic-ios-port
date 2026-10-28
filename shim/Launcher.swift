@@ -254,7 +254,7 @@ private struct LauncherView: View {
                         Picker("Performance overlay", selection: $model.overlay) { Text("Off").tag(0); Text("FPS").tag(1); Text("Detailed").tag(2) }
                             .pickerStyle(.segmented).frame(width: 200)
                     }
-                    row("Metal HUD", note: "Apple's GPU readout over the game: frame time, GPU time, memory.") { toggle($metalHUD) }
+                    row("Metal HUD", note: "The resolution the game really renders, against the screen's, with FPS, frame time and memory. Apple's own HUD: Settings › Developer › Graphics HUD.") { toggle($metalHUD) }
                     row("Smooth frame pacing", note: smoothPacing ? "Even frame times: holds 120, 60, 40 or 30 FPS, whatever the \(device) keeps up with." : "Off: the frame rate setting only.") { toggle($smoothPacing) }
                 }
                 section(4, "Data") {

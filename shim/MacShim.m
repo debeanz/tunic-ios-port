@@ -58,6 +58,7 @@ static void MSStatusCreate(void);
 static void MSAddMacAPIs(void);
 /* Tunic: the one colour between the start screen and the game (launcher fade, boot screen, loading screen) */
 static UIColor *MSTunicNight(void) { return [UIColor colorWithRed:0.067 green:0.082 blue:0.090 alpha:1]; }
+@class CAMetalLayer; static __weak CAMetalLayer *g_gameMetalLayer;   /* the game's own layer (setLayer:), for the HUD */
 static void MSTouchPadCreate(UIWindowScene *sc);
 static void MSTVRoute(void); static void MSTVObserve(void);
 static void MSLowLatencyWait(void); static void MSInputReport(void);
@@ -72,7 +73,7 @@ NSString *MacShimMacAppRoot(void); NSString *MacShimDataFolder(void);
 const char *MacShimMapLibraryPath(const char *path, char *buf, size_t len);
 void UMPrepareMetal(void);
 UIView *TunicPadCreate(UIView *parent);
-CGRect TunicGameRect(CGRect bounds); BOOL TunicStretch(void); int TunicFrameCapSetting(void);
+CGRect TunicGameRect(CGRect bounds); BOOL TunicStretch(void); int TunicFrameCapSetting(void); double TunicAspectValue(void);
 void MacShimSetFrameCap(int fps);
 static BOOL g_cursorHidden = NO, g_pointerLocked = NO;
 static CGPoint g_mouse;                                  /* Cocoa coords: origin bottom-left, points */
@@ -113,6 +114,14 @@ static void MSRefreshScreen(void) {
             if (x && x.bounds.size.height > 0 && MSCfgD(@"TVOut", 1) != 0 && MSCfgD(@"TVShape", 1) != 0) g_tvAspect = x.bounds.size.width / x.bounds.size.height;
         });
         if (g_tvAspect > 0) g_sw = round(g_sh * g_tvAspect);
+        /* Tunic: Aspect Ratio (start screen / Phone Settings). Unity renders a full-screen window at the screen's size,
+           so the shape has to be the screen's: narrower than the phone = keep the height, wider = keep the width.
+           The game view is framed to the same shape (TunicGameRect); Stretch then fills the screen with it. */
+        double ta = TunicAspectValue();
+        if (ta > 0 && g_tvAspect <= 0) {
+            double sw = s.bounds.size.width, sh = s.bounds.size.height;
+            if (sh * ta <= sw) { g_sh = sh; g_sw = round(sh * ta); } else { g_sw = sw; g_sh = round(sw / ta); }
+        }
     });
 }
 /* the phone's own window scene; with a second screen UIKit adds a scene for it, which must never get the game's
@@ -184,7 +193,10 @@ static CGRect MSUIFromAK(CGRect r) { double k = MSAKScale(); return CGRectMake(r
 + (NSArray *)screens { return @[ [self mainScreen] ]; }
 - (CGRect)frame { double w, h; MacShimScreenInfo(&w, &h, 0, 0); return MSAKFromUI(CGRectMake(0, 0, w, h)); }
 - (CGRect)visibleFrame { return [self frame]; }
-- (CGFloat)backingScaleFactor { double s; MacShimScreenInfo(0, 0, &s, 0); return [MSConfig()[@"Retina2x"] isEqual:@NO] ? s : 2; }
+/* Tunic: 1x. AppKit's screen size already IS the resolution picked on the start screen (MSAKScale); Cyberpunk ignored
+   the backing scale, but Unity multiplies by it - at 2x it rendered twice the picked resolution and the game's own
+   resolution menu never found its current mode (device run 2026-10-28). Retina2x = YES restores CyPort's 2x. */
+- (CGFloat)backingScaleFactor { return [MSConfig()[@"Retina2x"] isEqual:@YES] ? 2 : 1; }
 - (NSInteger)maximumFramesPerSecond { double f; MacShimScreenInfo(0, 0, 0, &f); return (NSInteger)f; }
 - (CGFloat)maximumExtendedDynamicRangeColorComponentValue {
     __block CGFloat v = 1; MSOnMain(^{ id n = [UIScreen.mainScreen valueForKey:@"currentEDRHeadroom"]; if ([n respondsToSelector:@selector(doubleValue)]) v = [n doubleValue]; }); return v < 1 ? 1 : v; }
@@ -418,6 +430,9 @@ static CGRect MSLayerFrame(UIView *host) {
 /* Phone Settings changed Aspect Ratio / Screen Scaling: lay the game windows out again (main thread) */
 void MacShimApplyDisplay(void) {
     MSMainAsync(^{
+        /* the screen the game is told about takes the new shape; Unity re-reads it like a Mac display change */
+        MSRefreshScreen();
+        [NSNotificationCenter.defaultCenter postNotificationName:NSApplicationDidChangeScreenParametersNotification object:NSApp];
         for (id w in [(NSApplication *)NSApp windows]) {
             UIWindow *uw = [w valueForKey:@"uiWindow"]; UIView *root = uw.rootViewController.view;
             [root setNeedsLayout]; [root layoutIfNeeded];
@@ -665,6 +680,7 @@ static void MSLeftPress(int by, BOOL down) {
 - (void)setLayer:(CALayer *)l {
     _layer = l; if (!l) return;
     MSLogf(@"%@ setLayer: %@", NSStringFromClass(self.class), NSStringFromClass(l.class));
+    if ([l isKindOfClass:CAMetalLayer.class]) g_gameMetalLayer = (CAMetalLayer *)l;
     MSOnMain(^{ l.contentsScale = UIScreen.mainScreen.nativeScale; l.frame = MSLayerFrame(self.host); [self.host.layer addSublayer:l]; });
     /* start screen "Performance overlay: Detailed" or the "Metal HUD" switch turns on Apple's Metal HUD for the game's layer */
     BOOL hud = MSPref(@"MacShimOverlay", 1) == 2 || [NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"];
@@ -4129,6 +4145,50 @@ static void MSInstallPacing(void) {
     MSStartRefreshTicker();
     MSLogf(@"frame pacing hooks: nextDrawable %d, command buffer %@ %d, drawable %d", g_origNextDrawable != NULL, NSStringFromClass(object_getClass(cb)), g_oCBPresent != NULL, g_oDrPresent != NULL);
 }
+/* ---------------------------------------------------------------- Tunic HUD (start screen "Metal HUD")
+ * Apple's Metal HUD only comes up for apps launched with it (Xcode, or Settings > Developer > Graphics HUD); a
+ * sideloaded app can't switch it on from inside (tried: MTL_HUD_ENABLED before the first device, and the layer's
+ * developerHUDProperties - both accepted, nothing shown). This is the shim's own: what the game really renders (its
+ * drawable) against the screen, FPS and frame time, memory, heat. Own window above everything, touches pass through;
+ * Core Animation text updated 4x a second, so it never waits on the game. */
+static UIWindow *g_hudWin; static CATextLayer *g_hudText; static CALayer *g_hudBg;
+@interface MSHUDTicker : NSObject @end
+@implementation MSHUDTicker
+- (void)tick:(CADisplayLink *)l {
+    static long long f0; static double t0, fps;
+    double now = CACurrentMediaTime(); long long f = g_frames;
+    if (t0 > 0 && now - t0 >= 0.25) { fps = (f - f0) / (now - t0); f0 = f; t0 = now; } else if (t0 <= 0) { f0 = f; t0 = now; return; } else return;
+    CAMetalLayer *gl = g_gameMetalLayer;
+    CGSize d = gl ? gl.drawableSize : CGSizeZero;
+    CGFloat sc = UIScreen.mainScreen.nativeScale; CGSize scr = UIScreen.mainScreen.bounds.size;
+    double pw = scr.width * sc, ph = scr.height * sc, pct = pw > 0 && d.width > 0 ? d.width / pw * 100 : 0;
+    int cap = g_userCap; double mem = MSFootprintMB();
+    NSString *s = [NSString stringWithFormat:@"%.0f FPS   %.1f ms%@\nrender %.0f×%.0f\nscreen %.0f×%.0f   (%.0f%%)\nRAM %.2f GB   %s",
+                   fps, fps > 0.5 ? 1000 / fps : 0, cap > 0 ? [NSString stringWithFormat:@"   cap %d", cap] : @"",
+                   d.width, d.height, pw, ph, pct, mem / 1024, MSThermal()];
+    [CATransaction begin]; [CATransaction setDisableActions:YES]; g_hudText.string = s; [CATransaction commit];
+}
+@end
+static void MSHUDStart(void) {                           /* main thread, at Play */
+    if (![NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"]) return;
+    UIWindowScene *sc = MSAppScene();
+    g_hudWin = sc ? [[UIWindow alloc] initWithWindowScene:sc] : [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    g_hudWin.windowLevel = UIWindowLevelAlert + 6; g_hudWin.userInteractionEnabled = NO; g_hudWin.backgroundColor = UIColor.clearColor;
+    g_hudWin.rootViewController = [UIViewController new]; g_hudWin.rootViewController.view.backgroundColor = UIColor.clearColor;
+    UIEdgeInsets in = (sc.windows.firstObject ?: UIApplication.sharedApplication.windows.firstObject).safeAreaInsets;
+    CGFloat x = MAX(in.left, 12) + 4, y = MAX(in.top, 8) + 4;
+    g_hudBg = [CALayer layer]; g_hudBg.frame = CGRectMake(x, y, 212, 72); g_hudBg.cornerRadius = 9; g_hudBg.cornerCurve = kCACornerCurveContinuous;
+    g_hudBg.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55].CGColor;
+    g_hudText = [CATextLayer layer]; g_hudText.frame = CGRectMake(10, 7, 198, 60); g_hudText.contentsScale = UIScreen.mainScreen.scale;
+    UIFont *f = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
+    g_hudText.font = (__bridge CFTypeRef)f; g_hudText.fontSize = 11; g_hudText.foregroundColor = [UIColor colorWithWhite:1 alpha:0.92].CGColor;
+    g_hudText.string = @"…"; [g_hudBg addSublayer:g_hudText];
+    [g_hudWin.rootViewController.view.layer addSublayer:g_hudBg]; g_hudWin.hidden = NO;
+    static MSHUDTicker *ticker; ticker = [MSHUDTicker new];
+    CADisplayLink *dl = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(tick:)];
+    dl.preferredFrameRateRange = CAFrameRateRangeMake(4, 8, 8); [dl addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    MSLogf(@"HUD on (render resolution, FPS, memory)");
+}
 static void MSStatusCreate(void) {                    /* main thread, before the game's main() */
     MSInstallPacing();
     if ([MSConfig()[@"ShowStatus"] isEqual:@NO]) return;
@@ -4156,6 +4216,7 @@ static void MSStatusCreate(void) {                    /* main thread, before the
     g_stLog.hidden = YES;
     g_statusWin.hidden = NO;
     MSTouchPadCreate(sc);
+    MSHUDStart();
     MSStartReadProgress();
 }
 /* Engine allocators keep a 64-slot table at the start of each pool object: slot i = 32-bit hash of pthread_self() of
