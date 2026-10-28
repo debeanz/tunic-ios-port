@@ -3027,6 +3027,28 @@ static NSString *MSStackKey(const uint64_t *f, int nf, intptr_t slide, uint64_t 
     return ex.count ? [ex componentsJoinedByString:@"<"] : @"(no exe frame)";
 }
 static thread_act_t g_mainMach;
+/* Frames stopped while the game is running: every thread's stack (pc, lr, frame-pointer chain) as library+offset, so
+   a hang shows what the main thread, the render thread and the rest wait in. Stacks are taken suspended (lock-free,
+   MSRawStack), named after resuming. */
+static void MSStallDump(NSString *why) {
+    thread_act_array_t th; mach_msg_type_number_t n = 0;
+    if (task_threads(mach_task_self(), &th, &n) != KERN_SUCCESS) return;
+    thread_act_t me = mach_thread_self();
+    MSLogf(@"stall: %@ - %u threads:", why, n);
+    for (mach_msg_type_number_t k = 0; k < n; k++) {
+        char nm[64] = ""; pthread_t pt = pthread_from_mach_thread_np(th[k]); if (pt) pthread_getname_np(pt, nm, sizeof nm);
+        uint64_t f[28]; int nf = 0; BOOL run = NO;
+        if (th[k] != me && thread_suspend(th[k]) == KERN_SUCCESS) { nf = MSRawStack(th[k], 0, 0, f, 28, &run); thread_resume(th[k]); }
+        if (nf) {
+            NSMutableArray *fr = [NSMutableArray array];
+            for (int i = 0; i < nf; i++) if (!(i == 1 && f[1] == f[0])) [fr addObject:MSWhere(f[i], 0, 0, 0)];
+            MSLogf(@"  [%u] %s%s%s: %@", k, th[k] == g_mainMach ? "MAIN " : "", nm, run ? " (running)" : "", [fr componentsJoinedByString:@" < "]);
+        }
+        mach_port_deallocate(mach_task_self(), th[k]);
+    }
+    mach_port_deallocate(mach_task_self(), me);
+    vm_deallocate(mach_task_self(), (vm_address_t)th, n * sizeof *th);
+}
 __attribute__((constructor)) static void MSNoteMainThread(void) { g_mainMach = pthread_mach_thread_np(pthread_self()); }
 static double MSThreadCPU(thread_act_t t) {
     thread_basic_info_data_t bi; mach_msg_type_number_t c = THREAD_BASIC_INFO_COUNT;
@@ -4318,6 +4340,10 @@ static void MSStartReadProgress(void) {
             if (tick % 2 == 1) { double cpu = MSCPUSeconds(); cpuPct = (cpu - lastCPU) / (now - lastT) * 100; lastCPU = cpu; lastT = now; }
             double mem = MSFootprintMB();
             if (tick % 2 == 1) { fps = (fr - frLast) / (now - frT); frLast = fr; frT = now; }
+            { static long long seenFr = -1; static double seenAt; static int dumps;
+              if (fr != seenFr) { seenFr = fr; seenAt = now; }
+              else if (fr > 0 && dumps < 2 && now - seenAt > (dumps ? 30 : 8) && !g_inBackground) {
+                  dumps++; MSStallDump([NSString stringWithFormat:@"no new frame for %.0f s after %lld frames", now - seenAt, fr]); } }
             if (tick % 10 == 9) {
                 mbps = (b - b5) / 5.0 / 1048576.0;
                 if (b != b5 || quiet++ % 6 == 0)
