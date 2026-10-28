@@ -687,7 +687,7 @@ static void MSLeftPress(int by, BOOL down) {
     if ([l isKindOfClass:CAMetalLayer.class] && hud) MSOnMain(^{
         /* the documented iOS 16+ property (MTL_HUD_ENABLED is also set before the game starts, see the boot block) */
         if ([l respondsToSelector:NSSelectorFromString(@"setDeveloperHUDProperties:")])
-            [l setValue:@{ @"mode": @"default", @"logging": @"default" } forKey:@"developerHUDProperties"];
+            [l setValue:@{ @"mode": @"default" } forKey:@"developerHUDProperties"];
         MSLogf(@"Metal HUD requested on the game layer (layer reports %@)",
                [l respondsToSelector:NSSelectorFromString(@"developerHUDProperties")] ? [l valueForKey:@"developerHUDProperties"] : @"no HUD property");
     });
@@ -4145,12 +4145,11 @@ static void MSInstallPacing(void) {
     MSStartRefreshTicker();
     MSLogf(@"frame pacing hooks: nextDrawable %d, command buffer %@ %d, drawable %d", g_origNextDrawable != NULL, NSStringFromClass(object_getClass(cb)), g_oCBPresent != NULL, g_oDrPresent != NULL);
 }
-/* ---------------------------------------------------------------- Tunic HUD (start screen "Metal HUD")
- * Apple's Metal HUD only comes up for apps launched with it (Xcode, or Settings > Developer > Graphics HUD); a
- * sideloaded app can't switch it on from inside (tried: MTL_HUD_ENABLED before the first device, and the layer's
- * developerHUDProperties - both accepted, nothing shown). This is the shim's own: what the game really renders (its
- * drawable) against the screen, FPS and frame time, memory, heat. Own window above everything, touches pass through;
- * Core Animation text updated 4x a second, so it never waits on the game. */
+/* ---------------------------------------------------------------- resolution readout (with the start screen's "Metal HUD")
+ * Apple's HUD (MTL_HUD_ENABLED + the layer's developerHUDProperties) covers frame rate, frame / GPU time and memory;
+ * this small readout in the bottom-left corner adds exactly what the game renders (its drawable) against the screen's
+ * pixels, to check the Resolution setting. Own window above everything, touches pass through; Core Animation text
+ * updated 4x a second, so it never waits on the game. */
 static UIWindow *g_hudWin; static CATextLayer *g_hudText; static CALayer *g_hudBg;
 @interface MSHUDTicker : NSObject @end
 @implementation MSHUDTicker
@@ -4162,10 +4161,8 @@ static UIWindow *g_hudWin; static CATextLayer *g_hudText; static CALayer *g_hudB
     CGSize d = gl ? gl.drawableSize : CGSizeZero;
     CGFloat sc = UIScreen.mainScreen.nativeScale; CGSize scr = UIScreen.mainScreen.bounds.size;
     double pw = scr.width * sc, ph = scr.height * sc, pct = pw > 0 && d.width > 0 ? d.width / pw * 100 : 0;
-    int cap = g_userCap; double mem = MSFootprintMB();
-    NSString *s = [NSString stringWithFormat:@"%.0f FPS   %.1f ms%@\nrender %.0f×%.0f\nscreen %.0f×%.0f   (%.0f%%)\nRAM %.2f GB   %s",
-                   fps, fps > 0.5 ? 1000 / fps : 0, cap > 0 ? [NSString stringWithFormat:@"   cap %d", cap] : @"",
-                   d.width, d.height, pw, ph, pct, mem / 1024, MSThermal()];
+    (void)fps;
+    NSString *s = [NSString stringWithFormat:@"render %.0f×%.0f\nscreen %.0f×%.0f  (%.0f%%)", d.width, d.height, pw, ph, pct];
     [CATransaction begin]; [CATransaction setDisableActions:YES]; g_hudText.string = s; [CATransaction commit];
 }
 @end
@@ -4176,10 +4173,10 @@ static void MSHUDStart(void) {                           /* main thread, at Play
     g_hudWin.windowLevel = UIWindowLevelAlert + 6; g_hudWin.userInteractionEnabled = NO; g_hudWin.backgroundColor = UIColor.clearColor;
     g_hudWin.rootViewController = [UIViewController new]; g_hudWin.rootViewController.view.backgroundColor = UIColor.clearColor;
     UIEdgeInsets in = (sc.windows.firstObject ?: UIApplication.sharedApplication.windows.firstObject).safeAreaInsets;
-    CGFloat x = MAX(in.left, 12) + 4, y = MAX(in.top, 8) + 4;
-    g_hudBg = [CALayer layer]; g_hudBg.frame = CGRectMake(x, y, 212, 72); g_hudBg.cornerRadius = 9; g_hudBg.cornerCurve = kCACornerCurveContinuous;
+    CGFloat H = UIScreen.mainScreen.bounds.size.height, x = MAX(in.left, 12) + 4, y = H - MAX(in.bottom, 8) - 4 - 40;   /* bottom-left */
+    g_hudBg = [CALayer layer]; g_hudBg.frame = CGRectMake(x, y, 196, 40); g_hudBg.cornerRadius = 9; g_hudBg.cornerCurve = kCACornerCurveContinuous;
     g_hudBg.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55].CGColor;
-    g_hudText = [CATextLayer layer]; g_hudText.frame = CGRectMake(10, 7, 198, 60); g_hudText.contentsScale = UIScreen.mainScreen.scale;
+    g_hudText = [CATextLayer layer]; g_hudText.frame = CGRectMake(10, 5, 182, 32); g_hudText.contentsScale = UIScreen.mainScreen.scale;
     UIFont *f = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
     g_hudText.font = (__bridge CFTypeRef)f; g_hudText.fontSize = 11; g_hudText.foregroundColor = [UIColor colorWithWhite:1 alpha:0.92].CGColor;
     g_hudText.string = @"…"; [g_hudBg addSublayer:g_hudText];
@@ -4187,7 +4184,7 @@ static void MSHUDStart(void) {                           /* main thread, at Play
     static MSHUDTicker *ticker; ticker = [MSHUDTicker new];
     CADisplayLink *dl = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(tick:)];
     dl.preferredFrameRateRange = CAFrameRateRangeMake(4, 8, 8); [dl addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
-    MSLogf(@"HUD on (render resolution, FPS, memory)");
+    MSLogf(@"Metal HUD on; resolution readout bottom-left (MTL_HUD_ENABLED=%s)", getenv("MTL_HUD_ENABLED") ?: "unset");
 }
 static void MSStatusCreate(void) {                    /* main thread, before the game's main() */
     MSInstallPacing();
@@ -4789,6 +4786,10 @@ static void MSInstallBackgroundFreeze(void) {
 
 __attribute__((constructor)) static void MSInit(void) {
     @autoreleasepool {
+        /* Tunic: Metal reads MTL_HUD_ENABLED when the process makes its first Metal device - set it first thing, from the
+           start screen's saved switch (as nxnative does in main). Set at Play it was too late: the launcher's SwiftUI had
+           already made a device. The switch also sets / clears it right away (Launcher.swift). */
+        if ([NSUserDefaults.standardUserDefaults boolForKey:@"TunicMetalHUD"]) setenv("MTL_HUD_ENABLED", "1", 1);
         MSOpenLog();
         /* Tunic: no MSInstallFreeHook() - it hooks Cyberpunk's engine allocator at a fixed address */
         MSInstallBackgroundFreeze();

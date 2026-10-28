@@ -94,7 +94,7 @@ private struct Grain: View {
                          with: .color(ink.opacity(0.035 + rnd() * 0.03)))
             }
         }
-        .drawingGroup()
+        // no .drawingGroup(): it renders through Metal, and the first Metal device must come after the Metal HUD switch
         .allowsHitTesting(false)
     }
 }
@@ -152,7 +152,10 @@ private struct LauncherView: View {
         .onAppear { withAnimation(.easeOut(duration: 0.5)) { appeared = true } }
         .onChange(of: aspect) { _ in tick() }.onChange(of: scaling) { _ in tick() }.onChange(of: frameRate) { _ in tick() }
         .onChange(of: touchControls) { _ in tick() }.onChange(of: floatingStick) { _ in tick() }.onChange(of: haptics) { _ in tick() }
-        .onChange(of: metalHUD) { _ in tick() }.onChange(of: smoothPacing) { _ in tick() }.onChange(of: lowLatency) { _ in tick() }
+        .onChange(of: metalHUD) { on in       // Metal reads this when the first Metal device is made: set it now, before Play
+            tick(); if on { setenv("MTL_HUD_ENABLED", "1", 1) } else { unsetenv("MTL_HUD_ENABLED") }
+        }
+        .onChange(of: smoothPacing) { _ in tick() }.onChange(of: lowLatency) { _ in tick() }
         .onChange(of: model.overlay) { _ in tick() }.onChange(of: model.resolution) { _ in tick() }
     }
 
@@ -254,7 +257,7 @@ private struct LauncherView: View {
                         Picker("Performance overlay", selection: $model.overlay) { Text("Off").tag(0); Text("FPS").tag(1); Text("Detailed").tag(2) }
                             .pickerStyle(.segmented).frame(width: 200)
                     }
-                    row("Metal HUD", note: "The resolution the game really renders, against the screen's, with FPS, frame time and memory. Apple's own HUD: Settings › Developer › Graphics HUD.") { toggle($metalHUD) }
+                    row("Metal HUD", note: "Apple's performance HUD over the game: frame rate, frame and GPU time, memory. The exact render resolution shows in the bottom-left corner.") { toggle($metalHUD) }
                     row("Smooth frame pacing", note: smoothPacing ? "Even frame times: holds 120, 60, 40 or 30 FPS, whatever the \(device) keeps up with." : "Off: the frame rate setting only.") { toggle($smoothPacing) }
                 }
                 section(4, "Data") {
